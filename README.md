@@ -1,110 +1,80 @@
-# 🎯 3-Month Goal OS
+# Goal Review — a reviews-first 3-month tracker
 
-A personal, installable, offline-first web app (PWA) that turns your 25 three-month goals into a living operating system. Fast daily input, auto-calculated weekly/monthly/period dashboards, a 5-minute Sunday check-in, trend charts, streaks, and reviews — with **zero** manual percentage math.
+A minimalist, installable, offline web app (PWA) built around **weekly and monthly check-ins**, not daily chores. Log things when you want; sit down each Sunday to see what's already recorded, fill the gaps, and understand your week — in about five minutes.
 
-**Period:** 13 Sep 2026 → 13 Dec 2026 (13 weeks, Mon→Sun). Today in the demo = Thu 8 Oct 2026 = **Week 4**.
-
----
-
-## Why a PWA and not Notion (short version)
-
-You asked me to evaluate Options A–D (section 12). Here is the honest comparison, judged on **fast tracking > beautiful design > technical complexity**.
-
-| Criterion | A: Notion only | B: Notion + automation | C: **Notion + PWA (this)** | D: Native app |
-|---|---|---|---|---|
-| Mobile input speed | 🔴 slow (open big DB) | 🟡 better | 🟢 **1–2 taps** | 🟢 fast |
-| Auto calc (avg, threshold, weighted score) | 🔴 formula hell | 🟡 needs scripts | 🟢 **done in JS** | 🟢 |
-| Notifications | 🔴 weak | 🟡 via tools | 🟢 **local + install** | 🟢 push |
-| Cost | 🟢 free | 🟡 paid tools | 🟢 **free** | 🔴 dev + stores |
-| Maintenance | 🟢 | 🟡 | 🟢 **single folder** | 🔴 high |
-| Reliability | 🟢 | 🟡 breaks | 🟢 **offline** | 🟢 |
-
-**Decision: Option C.** Notion's formula engine genuinely cannot do your averaging / threshold / fair-weighted-scoring logic cleanly, and it fails the "<1 minute on mobile" bar. This PWA does all the math, installs to your home screen, works offline, and **exports to a Notion-ready Markdown** so you can keep Notion as an archive/source-of-truth journal. See `ARCHITECTURE.md` for the full Notion schema if you still want to build it there.
-
-> ⚠️ **I could not access your existing Notion workspace** — there is no Notion integration connected to this environment. So I could not inspect or reuse your current goals/databases. `ARCHITECTURE.md` section 3 tells you exactly what to provide if you want me to migrate your existing Notion content.
+**Period:** 13 Sep 2026 → 13 Dec 2026 (13 weeks, Mon→Sun). All 25 goals, 4 categories, and their tracking types are preserved as editable data.
 
 ---
 
-## Run it
+## The four sections
 
-It's a static site — no build, no install, no backend.
-
-**Locally:**
-```bash
-cd /projects/sandbox
-python3 -m http.server 8099     # or: npx serve .
-# open http://localhost:8099
-```
-
-**On your phone (install as an app):**
-1. Host the folder anywhere static (GitHub Pages, Netlify drop, Vercel, or your own box). HTTPS is required for install + notifications.
-2. Open the URL in Safari (iOS) or Chrome (Android).
-3. **iOS:** Share → *Add to Home Screen*. **Android:** menu → *Install app*.
-4. It now opens full-screen like a native app and works offline.
-
----
-
-## The 7 navigation tabs
-
-| Tab | What it does |
+| Tab | Purpose |
 |---|---|
-| 🏠 **Today** | Ultra-fast daily input. Creatine/no-phone toggles, meal chips, quick +1 for weekly goals. One or two taps. |
-| 📊 **Week** | Auto-calculated weekly dashboard with the fair-weighted score, per-goal bars, and the **Sunday Check-In** button. |
-| 🎯 **Goals** | All goals by category/subcategory. Tap any to edit; add/pause/delete; edit milestones/books. |
-| 📅 **Monthly** | Monthly performance, category scores, strengths/weaknesses/most-improved. Save a monthly review. |
-| 📈 **3-Month** | Period score, **weekly trend chart**, by-category, full target-vs-actual table, superlatives, final report on 13 Dec. |
-| 📝 **Reviews** | History of all weekly & monthly reviews with your reflection answers. |
-| ⚙️ **Settings** | Change period, thresholds, scoring weights, notifications, load example data, **export/import**. |
+| **Week** (home) | The hero. The whole Sunday check-in on one page: coverage + score summary, every goal grouped by category with the right inline control, and an optional reflection. Prev/Next navigate any week. |
+| **Month** | Monthly check-in: weekly-goal averages by category, monthly & long-term goals against their own targets (counted once per month), and a monthly reflection. |
+| **Progress** | Visualisations — overall trend line, category comparison, strongest/weakest, full target-vs-actual table, and a goal-specific trend picker. |
+| **Goals** | One simple page to add / edit / pause / delete goals and milestones. |
 
 ---
 
-## The core loop
+## How logging works (the important part)
 
-**SET GOALS → TRACK (Today, <1 min) → AUTO-CALCULATE → SUNDAY REVIEW (~5 min) → IDENTIFY WEAKNESSES → ADJUST → REPEAT**
+Everything is one **shared set of records (“entries”)**. Logging during the week and filling things in on Sunday write to the *same* records — never duplicates.
 
-- **Daily (<1 min):** Open 🏠 Today, tap your toggles/chips, done.
-- **Sunday (~5 min):** 📊 Week → *Sunday Check-In*. It shows your score + 🟢🟡🔴 lists and asks the 5 reflection questions. Save → stored in Reviews.
-- **Monthly (~10 min):** 📅 Monthly → review trends → *Save monthly review*.
-- **13 Dec:** 📈 3-Month auto-generates your final report.
+- **Count goals** (gym, revision, family meals, calls): each ＋ adds one occurrence; − removes the latest. Multiple on the same day are supported.
+- **Daily yes/no habits** (creatine, no-phone): open **Days ▾** for the compact Mon–Sun grid. Tap a day to cycle **empty → done → N/A → empty**.
+- **Meals**: per-day Breakfast / Lunch / Dinner / N/A chips.
+- **Screen time (average)**: **Enter ▾** → type each day's minutes. Blank days stay blank.
+- **Class participation (%)**: Edit → attended / total.
+- **Weekly yes/no** (study plan, sharing): one “Yes” toggle.
+- **Monthly / project goals**: edited from Month or Goals (milestones, GPA, reading, qualifying classes).
+
+### Entry states — and why “missing” ≠ “zero”
+- **Logged** — a real recorded value/occurrence.
+- **Missing** — no entry yet. **Excluded from the score**, shown separately as *coverage* (e.g. “5/7 days logged”). A blank day is never counted as a failure or as zero.
+- **N/A** — the goal explicitly didn't apply that day (counts toward coverage, not as a miss).
+- **Reviewed** — you pressed *Mark week reviewed*. A week only shows “reviewed” when you say so; reopening it keeps everything editable.
+
+To record a genuine zero (e.g. “I did no gym this week”), just leave count at 0 or mark days N/A — that is honoured as a real result.
 
 ---
 
-## Scoring methodology (fair, not naïve)
+## Scoring (fair + coverage-aware)
 
-See `ARCHITECTURE.md` for full detail. In short:
-1. **Per-goal score** is computed by the goal's *type* (count / boolean / average / percentage / threshold / qualify / milestone / reading / meals) — never a universal checkbox.
-2. **Weekly score counts only Daily & Weekly goals** (the ones that recur weekly). Monthly/3-Month goals appear as *context* and are scored on their own tabs — so a monthly goal never shows as a weekly "miss."
-3. **Fair weighting:** within a category, goals are weighted by frequency (3M=4, M=3, W=2, D=1) so daily habits don't drown big goals.
-4. **Categories are averaged equally** into the overall score, so a category with many goals doesn't dominate.
+1. **Per-goal** score by type (count / boolean / average / percentage / threshold / qualify / milestone / reading / meals). Averages compare to a threshold; thresholds never show green unless actually met.
+2. **Missing data is excluded** from the denominator. Coverage (completeness) is reported *separately* so a half-logged week isn't mistaken for a bad week.
+3. **Weekly score counts only Daily & Weekly goals**; monthly/3-month goals appear as context and are scored on their own cadence (counted once per month, no double-counting across weeks).
+4. **Frequency weighting** (3M=4, M=3, W=2, D=1) inside a category so daily habits don't overpower big goals; **categories averaged equally** into the overall.
+5. **Historical edits recalculate everything** — totals, averages, charts.
 
-Statuses: 🟢 ≥85% · 🟡 50–84% · 🔴 <50% (all configurable in Settings).
+Status: green ≥85%, amber ≥50%, red <50%.
 
 ---
 
-## Your data
+## Design
 
-- Stored **on-device** in `localStorage`. Nothing leaves your phone.
-- **Back up / move devices:** Settings → *Export JSON*. Import on the new device.
-- **Mirror to Notion:** Settings → *Export Notion-ready Markdown*.
+Warm off-white background, near-black text, high contrast, one accent colour, status colours (green/amber/red) only where they mean something, clean list rows and tables instead of nested dark cards, generous whitespace. Works on mobile and desktop. The graphs and percentages are kept and refined — minimalism simplified the presentation, it didn't remove functionality.
+
+---
+
+## Run / install
+
+Static site, no build. **Live:** host the folder over HTTPS (GitHub Pages). On your phone, open it in Safari → Share → **Add to Home Screen** → launch full-screen (works offline).
+
+First run: **Settings → Load realistic example data** to explore (note: some days are intentionally left blank to show *missing* vs *zero*). When ready for real: **Settings → Clear all entries** (keeps your goals). Back up any time via **Export backup (JSON)**.
+
+To do a **retrospective review**, set **Settings → Treat “today” as** to a past Sunday; logging still attributes to the correct dates.
 
 ---
 
 ## Files
 
-| File | Role |
-|---|---|
-| `index.html` | App shell |
-| `styles.css` | Mobile-first dark UI |
-| `seed.js` | Config + your 25 goals as the **initial dataset** (editable data, not logic) |
-| `engine.js` | Pure calculation engine (scores, rollups, trends, streaks) |
-| `app.js` | UI, storage, views, check-ins, editor, notifications, export |
-| `engine.test.js` | 21 unit tests verifying the math (`node engine.test.js`) |
-| `sw.js` + `manifest.webmanifest` + `icon-*.png` | PWA offline + install |
+`index.html` · `styles.css` · `seed.js` (25 goals as editable seed data) · `engine.js` (coverage-aware calculation engine) · `app.js` (UI, entry store, reviews) · `engine.test.js` (26 tests: `node engine.test.js`) · `sw.js` + `manifest.webmanifest` + icons (PWA).
+
+See `ARCHITECTURE.md` for the data model, scoring details, and the optional Notion schema.
 
 ---
 
-## Known limitations (and what I did about them)
+## Verified
 
-- **No access to your Notion workspace** → built the full standalone system + a Notion schema doc + Markdown export so you can mirror.
-- **Web push notifications** are limited on iOS (only work when installed to Home Screen, iOS 16.4+). The app uses the local Notification API and schedules a daily reminder while open/installed; it is best-effort, not a cloud push service. Reminders are configurable in Settings.
-- **Emoji may render as boxes** in a headless/server browser without an emoji font — on your actual phone they render natively.
+All 26 engine tests pass, and the full UI was browser-tested against the 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.

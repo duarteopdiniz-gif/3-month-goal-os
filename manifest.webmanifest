@@ -1,13 +1,13 @@
 {
-  "name": "3-Month Goal OS",
-  "short_name": "3-Month OS",
-  "description": "Personal 3-month goal tracking: fast daily input, auto-calculated weekly/monthly/period dashboards and reviews.",
+  "name": "Goal Review",
+  "short_name": "Goal Review",
+  "description": "Reviews-first 3-month goal tracker: weekly & monthly check-ins, coverage-aware progress, clean charts.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0f1115",
-  "theme_color": "#0f1115",
+  "background_color": "#faf9f6",
+  "theme_color": "#faf9f6",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
