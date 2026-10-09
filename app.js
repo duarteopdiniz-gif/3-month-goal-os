@@ -125,16 +125,19 @@ function render(){
 }
 
 /* =========================================================================
- * WEEK — the hero: summary + per-category goal review + reflection
+ * WEEK — the hero: an interactive 7-day GRID to reconstruct/backfill the week.
+ * Goals are rows, Mon→Sun are columns. Every cell is directly editable.
+ * Missing (not entered) is visually distinct from an explicit miss (N/A).
  * ========================================================================= */
 function viewWeek(){
   const wk=currentWeek(); if(!wk) return `<div class="empty">No weeks in period.</div>`;
   const d=today();
-  const asOf = wk.end<d ? wk.end : d;                 // don't score days that haven't happened
+  const asOf = wk.end<d ? wk.end : d;
   const o=E.overallWeekly(state.goals,state.entries,wk,asOf,TH,FW,state.categories);
   const cov=E.weekCoverage(state.goals,state.entries,wk,asOf);
   const reviewed=isWeekReviewed(wk);
   const weeks=E.buildWeeks(state.period); const idx=weeks.findIndex(w=>w.start===wk.start);
+  const days=E.daysInWeek(wk);
 
   let h=`<div class="summary">
     <div>
@@ -142,29 +145,45 @@ function viewWeek(){
       <div class="sub">Week ${wk.index} · ${fmtRange(wk)} ${reviewed?'<span class="badge reviewed">reviewed</span>':''}</div>
     </div>
     <div style="text-align:right">
-      <div class="coverage">${cov.have}/${cov.need} entries logged (${cov.pct}%)</div>
-      <div class="rowbtn" style="justify-content:flex-end">
-        <button class="btn sec sm" id="wk-prev" ${idx<=0?"disabled":""}>‹ Prev</button>
-        <button class="btn sec sm" id="wk-next" ${idx>=weeks.length-1?"disabled":""}>Next ›</button>
-      </div>
+      <div class="coverage"><b>${cov.pct}%</b> of this week's data entered<br><span class="small">${cov.have}/${cov.need} expected entries</span></div>
     </div></div>`;
-  h+=`<div class="hint">Log anything you did this week below — tap days for daily habits, use ＋ for sessions, type values for the rest. Already-logged items are highlighted. Missing data is <b>not</b> counted as zero.</div>`;
+  h+=`<div class="jumpbar">
+      <button class="btn sec sm" id="wk-prev" ${idx<=0?"disabled":""}>‹ Prev</button>
+      <button class="btn sec sm" id="wk-this">This week</button>
+      <button class="btn sec sm" id="wk-next" ${idx>=weeks.length-1?"disabled":""}>Next ›</button>
+      <input type="date" id="wk-jump" value="${wk.start}" min="${state.period.start}" max="${state.period.end}" title="Jump to the week of a date">
+    </div>`;
 
+  // ---- the grid, grouped by category ----
   for(const c of state.categories){
+    const gs=state.goals.filter(g=>g.active!==false && g.cat===c.id && (g.freq==="D"||g.freq==="W"));
+    if(!gs.length) continue;
     const cw=E.categoryWeekly(c.id,state.goals,state.entries,wk,asOf,TH,FW);
-    if(!cw.rows.length && !cw.longerRows.length) continue;
-    h+=`<div class="catg"><div class="cn">${c.name}</div><div class="cs ${cw.score==null?"none st":"st "+cw.status}">${cw.score==null?"no data":E.round(cw.score)+"%"}</div></div>`;
-    h+=`<div class="rows">`;
-    for(const r of cw.rows) h+=weekGoalRow(r.goal, r, wk, asOf);
-    h+=`</div>`;
-    if(cw.longerRows.length){
-      h+=`<div class="note" style="margin:8px 0 4px">Longer-term (tracked on Month/Progress):</div><div class="rows">`;
-      for(const r of cw.longerRows) h+=longerRowCompact(r.goal, r);
-      h+=`</div>`;
-    }
+    h+=`<div class="catg"><div class="cn">${esc(c.name)}</div><div class="cs ${cw.score==null?"none st":"st "+cw.status}">${cw.score==null?"no data":E.round(cw.score)+"%"}</div></div>`;
+    h+=`<div class="gridscroll"><table class="grid"><thead><tr>
+      <th class="gcol">Goal</th>
+      ${days.map(dd=>`<th class="${dd===d?"today":""}">${dShort(dd)}<br>${dNum(dd)}</th>`).join("")}
+      <th class="rescol">Result</th></tr></thead><tbody>`;
+    for(const g of gs) h+=gridRow(g, days, wk, asOf, d);
+    h+=`</tbody></table></div>`;
   }
 
-  // reflection
+  // ---- longer-term goals: compact, link to Month/Goals (not daily) ----
+  const longer=state.goals.filter(g=>g.active!==false && (g.freq==="M"||g.freq==="3M"));
+  if(longer.length){
+    h+=`<h2 class="sec">Longer-term goals (update on Month / Goals)</h2><div class="rows">`;
+    for(const g of longer){ g._th=TH; const r=E.periodResult(g,state.entries,d); const st=r.score==null?"none":r.status;
+      h+=`<div class="grow click" data-goal="${g.id}"><div class="nm"><div class="title">${esc(g.title)}</div><div class="det">${freqLabel(g.freq)} · ${r.label}</div>${track(r.score,st)}</div><span class="st ${st}">${r.score==null?"—":E.round(r.score)+"%"}</span></div>`; }
+    h+=`</div>`;
+  }
+
+  h+=`<div class="gridlegend">
+    <span><i class="lg logged"></i>recorded</span>
+    <span><i class="lg missing"></i>missing (not entered — not a failure)</span>
+    <span><i class="lg na"></i>N/A / none</span>
+    <span class="small">Tap a cell to fill it. Future days are locked.</span></div>`;
+
+  // ---- reflection + review controls ----
   const rev=weekReview(wk.start)||{answers:{}};
   h+=`<h2 class="sec">Reflection (optional)</h2>
     <label class="fld">What went well?</label><textarea id="rf-wins">${esc(rev.answers.wins)}</textarea>
@@ -172,112 +191,138 @@ function viewWeek(){
     <label class="fld">One thing to change next week?</label><textarea id="rf-chg">${esc(rev.answers.change)}</textarea>
     <label class="fld">Main priority next week?</label><textarea id="rf-pri">${esc(rev.answers.priority)}</textarea>
     <div style="height:12px"></div>
-    <button class="btn" id="wk-complete">${reviewed?"Update review":"Mark week reviewed & save"}</button>
+    <button class="btn" id="wk-complete">${reviewed?"Update review (stays editable)":"Mark week reviewed & save"}</button>
     <button class="btn ghost" id="wk-saveonly">Save reflection without marking reviewed</button>`;
   return h;
 }
 function fmtRange(wk){ const a=new Date(E.parseDate(wk.start)),b=new Date(E.parseDate(wk.end));
   const o={day:"numeric",month:"short"}; return `${a.toLocaleDateString(undefined,o)} – ${b.toLocaleDateString(undefined,o)}`; }
 
-/* a weekly goal row with the right inline control */
-function weekGoalRow(g, r, wk, asOf){
-  const status=r.score==null?"none":r.status;
-  const valTxt = r.score==null ? `<span class="st none">—</span>` : `<span class="val">${r.label}</span> ${stText(status, r.score!=null?E.round(r.score)+"%":"")}`;
-  let control="";
-  if(g.type==="count"){
-    const todayStr2=today();
-    control=`<div class="counter">
-      <button data-cdec="${g.id}">−</button>
-      <span class="v">${r.actual}</span>
-      <button data-cinc="${g.id}">＋</button></div>`;
-  } else if(g.type==="boolean" && g.freq==="D"){
-    control=`<button class="btn sec sm" data-expand="${g.id}">Days ▾</button>`;
-  } else if(g.type==="boolean"){
-    const yes=r.complete;
-    control=`<button class="chip ${yes?"on":""}" data-wkbool="${g.id}">${yes?"✓ Yes":"Mark done"}</button>`;
-  } else if(g.type==="meals"){
-    control=`<button class="btn sec sm" data-expand="${g.id}">Days ▾</button>`;
-  } else if(g.type==="average"){
-    control=`<button class="btn sec sm" data-expand="${g.id}">Enter ▾</button>`;
-  } else if(g.type==="percentage"){
-    control=`<button class="btn sec sm" data-editpct="${g.id}">Edit</button>`;
-  }
-  let row=`<div class="grow"><div class="nm"><div class="title">${esc(g.title)}</div>
-    <div class="det">${weekTargetText(g)} · ${valTxt}${r.coverage&&r.coverage.need?` · <span class="small">${r.coverage.have}/${r.coverage.need} days logged</span>`:""}</div>
-    ${track(r.score,status)}</div>${control}</div>`;
-  return row;
-}
-function weekTargetText(g){
-  if(g.type==="count") return `${g.target} ${g.unit||"/wk"}`;
-  if(g.type==="boolean"&&g.freq==="D") return `every day`;
-  if(g.type==="boolean") return `once this week`;
-  if(g.type==="meals") return `${g.target} meals/day`;
-  if(g.type==="average") return `avg ${g.lowerIsBetter?"≤":"≥"}${E.fmtMin(g.target)}/day`;
-  if(g.type==="percentage") return `target ${g.target}%`;
-  return g.unit||"";
-}
-function longerRowCompact(g,r){
-  const status=r.score==null?"none":r.status;
-  return `<div class="grow click" data-goal="${g.id}"><div class="nm"><div class="title">${esc(g.title)}</div>
-    <div class="det">${freqLabel(g.freq)} · ${r.label}</div>${track(r.score,status)}</div>
-    <span class="st ${status}">${r.score==null?"—":E.round(r.score)+"%"}</span></div>`;
+/* one grid row: goal name + 7 day cells + result summary */
+function gridRow(g, days, wk, asOf, today_){
+  g._th=TH;
+  const r=E.weeklyResult(g, state.entries, wk, asOf);
+  const es=E.entriesFor(g, state.entries, wk.start, wk.end);
+  const byDay=E.byDay(es, days);
+  const sub = g.type==="count"? `${g.target} ${g.unit||"/wk"}`
+    : g.type==="boolean"&&g.freq==="D"? "every day"
+    : g.type==="boolean"? "once / week"
+    : g.type==="meals"? `${g.target} meals/day`
+    : g.type==="average"? `avg ${g.lowerIsBetter?"≤":"≥"}${E.fmtMin(g.target)}`
+    : g.type==="percentage"? `attend %` : "";
+  let cells="";
+  for(const dd of days){ const future = dd>today_; cells += gridCell(g, dd, byDay[dd], future); }
+  const st = r.score==null? "none" : r.status;
+  const res = r.score==null
+    ? `<span class="rv st none">—</span>`
+    : `<div class="rv">${esc(r.label)}</div><div class="rp st ${st}">${E.round(r.score)}%</div>`;
+  return `<tr>
+    <td class="gcol"><div class="gt">${esc(g.title)}</div><div class="gd">${sub}</div></td>
+    ${cells}
+    <td class="rescol">${res}</td></tr>`;
 }
 
-/* expandable 7-day editor (daily boolean / meals / average) */
-function expandDays(goalId){
-  const g=goalById(goalId); const wk=currentWeek(); const days=E.daysInWeek(wk); const d=today();
-  const es=E.entriesFor(g,state.entries,wk.start,wk.end);
-  const byDay=E.byDay(es,days);
-  let inner="";
-  if(g.type==="boolean"){
-    inner=`<div class="week7">`+days.map(dd=>{
-      const cell=byDay[dd]; const future=dd>d; const stt=future?"future":cell.state;
-      const mk= cell.state==="logged"?"✓" : cell.state==="na"?"–" : "·";
-      return `<div class="day ${stt}" data-dayb="${goalId}:${dd}"><div class="dl">${dShort(dd)}</div><div class="mk">${mk}</div><div class="num">${dNum(dd)}</div></div>`;
-    }).join("")+`</div><div class="note">Tap: empty → done → N/A → empty. Missing days are not counted as failures.</div>`;
-  } else if(g.type==="meals"){
-    inner=days.map(dd=>{
-      const cell=byDay[dd]; const future=dd>d; const m=cell.meals||{};
-      const items=[["b","B"],["l","L"],["d","D"],["s","S"]];
-      return `<div class="grow" style="border-top:1px solid var(--line)"><div class="nm"><div class="title" style="font-size:.85rem">${dShort(dd)} ${dNum(dd)}</div>
-        <div class="chips">${items.map(([k,lab])=>`<button class="chip ${m[k]?"on":""}" ${future?"disabled":""} data-mealc="${goalId}:${dd}:${k}">${lab}</button>`).join("")}
-        <button class="chip" ${future?"disabled":""} data-mealna="${goalId}:${dd}">N/A</button></div></div></div>`;
-    }).join("");
-  } else if(g.type==="average"){
-    inner=days.map(dd=>{
-      const cell=byDay[dd]; const future=dd>d;
-      const val = cell.state==="logged" ? cell.value : "";
-      return `<div class="grow" style="border-top:1px solid var(--line)"><div class="nm"><div class="title" style="font-size:.85rem">${dShort(dd)} ${dNum(dd)} ${cell.state==="missing"&&!future?'<span class="badge missing">missing</span>':''}</div></div>
-        <input type="number" inputmode="numeric" placeholder="minutes" value="${val}" ${future?"disabled":""} data-avg="${goalId}:${dd}" style="width:120px">
-        <button class="btn ghost sm" data-avgclr="${goalId}:${dd}">clear</button></div>`;
-    }).join("");
+/* a single editable day cell, rendered per goal type */
+function gridCell(g, date, cell, future){
+  if(future) return `<td><div class="cell future">·</div></td>`;
+  const key=`${g.id}:${date}`;
+  if(g.type==="count"){
+    const n = state.entries.filter(e=>e.goalId===g.id && e.date===date && e.kind==="logged").length;
+    const na = cell.state==="na";
+    const cls = n>0? "count has" : na? "na" : "count missing";
+    const inner = na? "–" : n>0? `<span class="n">${n}</span>` : "·";
+    return `<td><div class="cell ${cls}" data-cell="count:${key}">${inner}</div></td>`;
   }
-  const bg=sheet(`<h3>${esc(g.title)}</h3><div class="small">${weekTargetText(g)} · ${fmtRange(wk)}</div><div style="height:10px"></div>${inner}
-    <div style="height:14px"></div><button class="btn" id="days-done">Done</button>`);
-  bg.querySelector("#days-done").onclick=()=>{ bg.remove(); render(); };
-  bindDayEditors(bg);
+  if(g.type==="boolean"){
+    const mk = cell.state==="logged"?"✓" : cell.state==="na"?"–" : "·";
+    return `<td><div class="cell ${cell.state}" data-cell="bool:${key}">${mk}</div></td>`;
+  }
+  if(g.type==="average"){
+    const show = cell.state==="logged"? E.fmtMin(Number(cell.value)) : cell.state==="na"? "–" : "·";
+    return `<td><div class="cell val ${cell.state}" data-cell="avg:${key}">${show}</div></td>`;
+  }
+  if(g.type==="meals"){
+    const m=cell.meals||{}; const c=Object.values(m).filter(Boolean).length;
+    const cls = cell.state==="logged"? "count has" : cell.state==="na"? "na" : "count missing";
+    const inner = cell.state==="na"? "–" : cell.state==="logged"? `<span class="n">${c}</span>` : "·";
+    return `<td><div class="cell ${cls}" data-cell="meals:${key}">${inner}</div></td>`;
+  }
+  if(g.type==="percentage"){
+    if(date!==currentWeek().start) return `<td><div class="cell missing" style="cursor:default">·</div></td>`;
+    const e=state.entries.filter(x=>x.goalId===g.id && x.date>=currentWeek().start && x.date<=currentWeek().end && x.kind==="logged").slice(-1)[0];
+    const show = e? `${e.value}/${e.total||"?"}` : "·";
+    return `<td><div class="cell val ${e?"logged":"missing"}" data-cell="pct:${key}">${show}</div></td>`;
+  }
+  return `<td><div class="cell missing">·</div></td>`;
 }
-function bindDayEditors(bg){
-  bg.querySelectorAll("[data-dayb]").forEach(el=>el.onclick=()=>{
-    if(el.classList.contains("future"))return;
-    const [gid,dd]=el.dataset.dayb.split(":"); const cur=singleEntry(gid,dd);
+
+/* === cell interaction === */
+function onCellClick(spec, el){
+  const [type, gid, date] = spec.split(":");
+  const g=goalById(gid);
+  if(type==="bool"){
+    const cur=singleEntry(gid,date);
     const next = !cur ? "logged" : cur.kind==="logged" ? "na" : "missing";
-    setDayState(gid,dd,next); flash("Saved");
-    // re-render the sheet
-    bg.remove(); expandDays(gid);
-  });
-  bg.querySelectorAll("[data-mealc]").forEach(el=>el.onclick=()=>{
-    const [gid,dd,k]=el.dataset.mealc.split(":"); let e=state.entries.find(x=>x.goalId===gid&&x.date===dd&&x.kind!=="na");
-    if(!e){ e=mkEntry(gid,dd,{meals:{}}); state.entries.push(e); } e.meals=e.meals||{}; e.meals[k]=!e.meals[k]; e.kind="logged"; save();
-    bg.remove(); expandDays(gid);
-  });
-  bg.querySelectorAll("[data-mealna]").forEach(el=>el.onclick=()=>{ const [gid,dd]=el.dataset.mealna.split(":"); setDayState(gid,dd,"na"); bg.remove(); expandDays(gid); });
-  bg.querySelectorAll("[data-avg]").forEach(el=>el.onchange=()=>{
-    const [gid,dd]=el.dataset.avg.split(":"); const v=el.value.trim();
-    if(v==="") clearValue(gid,dd); else setValue(gid,dd,{value:Number(v)}); flash("Saved");
-  });
-  bg.querySelectorAll("[data-avgclr]").forEach(el=>el.onclick=()=>{ const [gid,dd]=el.dataset.avgclr.split(":"); clearValue(gid,dd); bg.remove(); expandDays(gid); });
+    setDayState(gid,date,next); render();
+  } else if(type==="count"){ countCellPopover(g, date, el); }
+  else if(type==="meals"){ mealsCellPopover(g, date, el); }
+  else if(type==="avg"){ avgCellPrompt(g, date, el); }
+  else if(type==="pct"){ editPct(gid); }
 }
+function countCellPopover(g, date, el){
+  closePopovers();
+  const n=()=>state.entries.filter(e=>e.goalId===g.id && e.date===date && e.kind==="logged").length;
+  const pop=document.createElement("div"); pop.className="cellpop";
+  const place=()=>{ const rct=el.getBoundingClientRect(); pop.style.top=Math.min(rct.bottom+6, window.innerHeight-180)+"px"; pop.style.left=Math.max(8, Math.min(rct.left-70, window.innerWidth-196))+"px"; };
+  const paint=()=>{ pop.innerHTML=`<h4>${esc(g.title)} · ${dShort(date)} ${dNum(date)}</h4>
+    <div class="r"><span>Sessions</span><div class="counter"><button id="cp-dec">−</button><span class="v">${n()}</span><button id="cp-inc">＋</button></div></div>
+    <button class="btn ghost sm" id="cp-none" style="width:100%">Record "none" (0)</button>
+    <button class="btn sm" id="cp-done" style="width:100%;margin-top:6px">Done</button>`;
+    pop.querySelector("#cp-inc").onclick=()=>{ addOccurrence(g.id,date); paint(); };
+    pop.querySelector("#cp-dec").onclick=()=>{ const list=state.entries.filter(e=>e.goalId===g.id&&e.date===date&&e.kind==="logged"); if(list.length){ state.entries=state.entries.filter(e=>e.id!==list[list.length-1].id); save(); } paint(); };
+    pop.querySelector("#cp-none").onclick=()=>{ setDayState(g.id,date,"na"); closePopovers(); render(); };
+    pop.querySelector("#cp-done").onclick=()=>{ closePopovers(); render(); };
+  };
+  document.body.appendChild(pop); place(); paint(); armOutside(pop);
+}
+function mealsCellPopover(g, date, el){
+  closePopovers();
+  const pop=document.createElement("div"); pop.className="cellpop";
+  const rct=el.getBoundingClientRect(); pop.style.top=Math.min(rct.bottom+6, window.innerHeight-200)+"px"; pop.style.left=Math.max(8, Math.min(rct.left-70, window.innerWidth-196))+"px";
+  const get=()=>state.entries.find(x=>x.goalId===g.id&&x.date===date&&x.kind!=="na");
+  const items=[["b","Breakfast"],["l","Lunch"],["d","Dinner"],["s","Snack"]];
+  const paint=()=>{ const e=get(); const m=(e&&e.meals)||{};
+    pop.innerHTML=`<h4>${esc(g.title)} · ${dShort(date)} ${dNum(date)}</h4>
+      <div class="chips">${items.map(([k,lab])=>`<button class="chip ${m[k]?"on":""}" data-mk="${k}">${lab}</button>`).join("")}</div>
+      <button class="btn ghost sm" id="mp-na" style="width:100%;margin-top:8px">Mark N/A</button>
+      <button class="btn sm" id="mp-done" style="width:100%;margin-top:6px">Done</button>`;
+    pop.querySelectorAll("[data-mk]").forEach(b=>b.onclick=()=>{ let e=get(); if(!e){ e=mkEntry(g.id,date,{meals:{}}); state.entries.push(e); } e.kind="logged"; e.meals=e.meals||{}; e.meals[b.dataset.mk]=!e.meals[b.dataset.mk]; save(); paint(); });
+    pop.querySelector("#mp-na").onclick=()=>{ setDayState(g.id,date,"na"); closePopovers(); render(); };
+    pop.querySelector("#mp-done").onclick=()=>{ closePopovers(); render(); };
+  };
+  document.body.appendChild(pop); paint(); armOutside(pop);
+}
+function avgCellPrompt(g, date, el){
+  closePopovers();
+  const pop=document.createElement("div"); pop.className="cellpop";
+  const rct=el.getBoundingClientRect(); pop.style.top=Math.min(rct.bottom+6, window.innerHeight-170)+"px"; pop.style.left=Math.max(8, Math.min(rct.left-70, window.innerWidth-196))+"px";
+  const cur=state.entries.find(x=>x.goalId===g.id&&x.date===date&&x.kind==="logged");
+  pop.innerHTML=`<h4>${esc(g.title)} · ${dShort(date)} ${dNum(date)}</h4>
+    <div class="small" style="margin-bottom:6px">Minutes (e.g. 150 = 2h 30m)</div>
+    <input type="number" inputmode="numeric" id="av-in" value="${cur?cur.value:""}" placeholder="minutes">
+    <div class="r" style="margin-top:8px">
+      <button class="btn ghost sm" id="av-clr">Clear</button>
+      <button class="btn sm" id="av-save">Save</button></div>`;
+  document.body.appendChild(pop);
+  const inp=pop.querySelector("#av-in"); inp.focus();
+  pop.querySelector("#av-save").onclick=()=>{ const v=inp.value.trim(); if(v==="") clearValue(g.id,date); else setValue(g.id,date,{value:Number(v)}); closePopovers(); render(); };
+  pop.querySelector("#av-clr").onclick=()=>{ clearValue(g.id,date); closePopovers(); render(); };
+  inp.onkeydown=e=>{ if(e.key==="Enter") pop.querySelector("#av-save").click(); };
+  armOutside(pop);
+}
+function armOutside(pop){ pop.addEventListener("click",e=>e.stopPropagation());
+  setTimeout(()=>document.addEventListener("click",closePopovers,{once:true}),0); }
+function closePopovers(){ document.querySelectorAll(".cellpop").forEach(p=>p.remove()); }
 
 /* percentage editor (class participation) */
 function editPct(goalId){
@@ -314,25 +359,46 @@ function viewMonth(){
     for(const cc of o.cats){ catAgg[cc.cat.id].sum+=cc.score; catAgg[cc.cat.id].n++; }
   }
   const monthScore = oN? oSum/oN : null;
-  h+=`<h2 class="sec">Weekly-goal performance (avg of weeks in month)</h2>`;
-  h+=`<div class="summary"><div class="bignum ${monthScore==null?"none":""}">${monthScore==null?"—":E.round(monthScore)+"%"}</div></div>`;
+  const reviewed=(monthReview(key)||{}).completed;
+  // change vs previous month
+  const prevKey=months[months.indexOf(key)-1];
+  let delta=null;
+  if(prevKey){ const pw=E.buildWeeks(state.period).filter(w=>E.monthKeyOf(w.start)===prevKey && E.parseDate(w.start)<=E.parseDate(d));
+    let ps=0,pn=0; for(const w of pw){ const o=E.overallWeekly(state.goals,state.entries,w,w.end<d?w.end:d,TH,FW,state.categories); if(o.score!=null){ps+=o.score;pn++;} }
+    if(pn && monthScore!=null) delta=monthScore-(ps/pn); }
+
+  h+=`<h2 class="sec">Weekly-goal performance (avg of weeks in month) ${reviewed?'<span class="badge reviewed">reviewed</span>':''}</h2>`;
+  h+=`<div class="summary"><div><div class="bignum ${monthScore==null?"none":""}">${monthScore==null?"—":E.round(monthScore)+"%"}</div>
+      ${delta!=null?`<div class="sub">${delta>=0?"▲":"▼"} ${Math.abs(E.round(delta))} pts vs ${monthLabel(prevKey).split(" ")[0]}</div>`:""}</div></div>`;
   h+=`<div class="rows">`;
   for(const c of state.categories){ const a=catAgg[c.id]; if(!a.n) continue; const sc=a.sum/a.n; const st=E.statusOf(sc,TH);
     h+=`<div class="grow"><div class="nm"><div class="title">${esc(c.name)}</div>${track(sc,st)}</div><span class="st ${st}">${E.round(sc)}%</span></div>`; }
   h+=`</div>`;
 
-  // monthly + 3M goals progress (counted within month window, once)
+  // per-week summary with open links (jump straight to that week's grid to backfill)
+  h+=`<h2 class="sec">Weeks this month — open any to backfill</h2><div class="rows">`;
+  for(const w of weeks){ const future=E.parseDate(w.start)>E.parseDate(d);
+    const asOf=w.end<d?w.end:d; const o=future?{score:null}:E.overallWeekly(state.goals,state.entries,w,asOf,TH,FW,state.categories);
+    const cov=future?{pct:0,have:0,need:0}:E.weekCoverage(state.goals,state.entries,w,asOf);
+    const st=o.score==null?"none":o.status;
+    h+=`<div class="grow ${future?"":"click"}" ${future?"":`data-openweek="${w.start}"`}><div class="nm"><div class="title">Week ${w.index} · ${fmtRange(w)}</div>
+      <div class="det">${future?"upcoming":`${cov.pct}% entered · ${cov.have}/${cov.need}`}</div></div>
+      <span class="st ${st}">${o.score==null?"—":E.round(o.score)+"%"}</span></div>`; }
+  h+=`</div>`;
+
+  // monthly + 3M goals — editable (counted within month window, once)
   const win=E.monthRange(key);
   const longer=state.goals.filter(g=>g.active!==false && (g.freq==="M"||g.freq==="3M"));
   if(longer.length){
-    h+=`<h2 class="sec">Monthly & long-term goals</h2><div class="rows">`;
+    h+=`<h2 class="sec">Monthly & long-term goals — tap to update</h2><div class="rows">`;
     for(const g of longer){ g._th=TH;
       const r = g.type==="count"? E.periodResult(g,state.entries, win.end>d?d:win.end) : E.periodResult(g,state.entries,d);
       const st=r.score==null?"none":r.status;
-      const click = (["milestone","threshold","qualify","reading","count"].includes(g.type))?`data-goal="${g.id}" class="grow click"`:`class="grow"`;
-      h+=`<div ${click}><div class="nm"><div class="title">${esc(g.title)}</div><div class="det">${freqLabel(g.freq)} · ${r.label}</div>${track(r.score,st)}</div>
+      const remaining = (g.type==="count" && r.remaining>0)? ` · ${r.remaining} to go` : "";
+      h+=`<div class="grow click" data-month-goal="${g.id}:${key}"><div class="nm"><div class="title">${esc(g.title)}</div>
+        <div class="det">${freqLabel(g.freq)} · recorded ${r.label}${remaining}</div>${track(r.score,st)}</div>
         <span class="st ${st}">${r.score==null?"—":E.round(r.score)+"%"}${r.complete?" ✓":""}</span></div>`; }
-    h+=`</div>`;
+    h+=`</div><div class="note">Count goals (e.g. a monthly date): tap to add/remove within this month — never double-counted. Projects: tap to tick milestones.</div>`;
   }
 
   // reflection
@@ -341,8 +407,31 @@ function viewMonth(){
     <label class="fld">What went well this month?</label><textarea id="mo-wins">${esc(rev.answers.wins)}</textarea>
     <label class="fld">What did you struggle with?</label><textarea id="mo-str">${esc(rev.answers.struggles)}</textarea>
     <label class="fld">Priority for next month?</label><textarea id="mo-pri">${esc(rev.answers.priority)}</textarea>
-    <div style="height:12px"></div><button class="btn" id="mo-save" data-key="${key}">${rev.completed?"Update monthly review":"Save monthly review"}</button>`;
+    <div style="height:12px"></div><button class="btn" id="mo-save" data-key="${key}">${rev.completed?"Update monthly review (stays editable)":"Mark month reviewed & save"}</button>`;
   return h;
+}
+
+/* editor for a monthly/long-term goal, opened from the Month review */
+function monthGoalEditor(gid, monthKey){
+  const g=goalById(gid); const win=E.monthRange(monthKey);
+  if(g.type==="count"){
+    // list occurrences in this month, add/remove — counted once each
+    const occ=()=>state.entries.filter(e=>e.goalId===gid && e.date>=win.start && e.date<=win.end && e.kind==="logged").sort((a,b)=>a.date.localeCompare(b.date));
+    const bg=sheet(`<h3>${esc(g.title)}</h3><div class="small">${monthLabel(monthKey)} · target ${g.target} ${g.unit||""}</div><div id="mg-body"></div>`);
+    const paint=()=>{ const list=occ();
+      bg.querySelector("#mg-body").innerHTML=`<div class="rows" style="margin-top:10px">${list.length?list.map(e=>`<div class="grow"><div class="nm"><div class="title">${longDate(e.date)}</div></div><button class="btn ghost sm" data-del="${e.id}">remove</button></div>`).join(""):'<div class="empty">None recorded this month</div>'}</div>
+        <label class="fld">Add a date</label><input type="date" id="mg-date" min="${win.start}" max="${win.end}" value="${win.start}">
+        <button class="btn sm" id="mg-add" style="margin-top:8px">Add occurrence</button>
+        <div style="height:10px"></div><button class="btn" id="mg-done">Done</button>`;
+      bg.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{ state.entries=state.entries.filter(x=>x.id!==b.dataset.del); save(); paint(); });
+      bg.querySelector("#mg-add").onclick=()=>{ const dt=bg.querySelector("#mg-date").value; if(dt){ addOccurrence(gid,dt); paint(); } };
+      bg.querySelector("#mg-done").onclick=()=>{ bg.remove(); render(); };
+    };
+    paint();
+  } else {
+    // milestone / threshold / qualify / reading → reuse the full goal editor
+    editGoal(gid);
+  }
 }
 
 /* =========================================================================
@@ -462,17 +551,11 @@ function bind(){
   if(wn) wn.onclick=()=>{ const weeks=E.buildWeeks(state.period); const i=weeks.findIndex(w=>w.start===currentWeek().start); if(i<weeks.length-1){ viewWeekStart=weeks[i+1].start; render(); } };
 
   // count +/-
-  document.querySelectorAll("[data-cinc]").forEach(b=>b.onclick=()=>{ const g=b.dataset.cinc; addOccurrence(g, defaultLogDate(g)); flash("Logged"); render(); });
-  document.querySelectorAll("[data-cdec]").forEach(b=>b.onclick=()=>{ const g=b.dataset.cdec; const wk=currentWeek();
-    // remove latest occurrence in the viewed week
-    const inWk=state.entries.filter(e=>e.goalId===g && e.date>=wk.start && e.date<=wk.end && e.kind==="logged").sort((a,b2)=>a.ts-b2.ts);
-    if(inWk.length){ const id=inWk[inWk.length-1].id; state.entries=state.entries.filter(e=>e.id!==id); save(); flash("Removed"); render(); } });
-  document.querySelectorAll("[data-wkbool]").forEach(b=>b.onclick=()=>{ const g=b.dataset.wkbool; const wk=currentWeek();
-    const has=state.entries.some(e=>e.goalId===g && e.date>=wk.start && e.date<=wk.end && e.kind==="logged");
-    if(has){ state.entries=state.entries.filter(e=>!(e.goalId===g && e.date>=wk.start && e.date<=wk.end)); } else { addOccurrence(g, defaultLogDate(g)); }
-    save(); flash("Saved"); render(); });
-  document.querySelectorAll("[data-expand]").forEach(b=>b.onclick=()=>expandDays(b.dataset.expand));
-  document.querySelectorAll("[data-editpct]").forEach(b=>b.onclick=()=>editPct(b.dataset.editpct));
+  // grid cells (weekly check-in)
+  document.querySelectorAll("[data-cell]").forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); onCellClick(el.dataset.cell, el); });
+  // week navigation + jump
+  const wt=document.getElementById("wk-this"); if(wt) wt.onclick=()=>{ const wk=E.weekForDate(today(),state.period); viewWeekStart=wk?wk.start:null; render(); };
+  const wj=document.getElementById("wk-jump"); if(wj) wj.onchange=()=>{ const w=E.weekForDate(wj.value,state.period); if(w){ viewWeekStart=w.start; render(); } };
   document.querySelectorAll("[data-goal]").forEach(el=>el.onclick=()=>editGoal(el.dataset.goal));
 
   // week complete / save
@@ -481,6 +564,8 @@ function bind(){
 
   // month
   document.querySelectorAll("[data-mo]").forEach(b=>b.onclick=()=>{ viewMonthKey=b.dataset.mo; render(); });
+  document.querySelectorAll("[data-openweek]").forEach(el=>el.onclick=()=>{ viewWeekStart=el.dataset.openweek; go("week"); });
+  document.querySelectorAll("[data-month-goal]").forEach(el=>el.onclick=()=>{ const [gid,mk]=el.dataset.monthGoal.split(":"); monthGoalEditor(gid,mk); });
   const ms=document.getElementById("mo-save"); if(ms) ms.onclick=()=>saveMonth(ms.dataset.key);
 
   // goals

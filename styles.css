@@ -171,3 +171,46 @@ nav.tabs button.active{color:var(--accent);background:var(--accent-soft)}
 .badge.reviewed{background:var(--accent-soft);color:var(--accent)}
 .small{font-size:.8rem;color:var(--ink-2)}
 .rowbtn{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+
+/* ===== weekly check-in grid ===== */
+.gridscroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);-webkit-overflow-scrolling:touch}
+table.grid{border-collapse:collapse;width:100%;font-size:.84rem}
+table.grid th,table.grid td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:0;text-align:center}
+table.grid tr:last-child td{border-bottom:none}
+table.grid th:last-child,table.grid td:last-child{border-right:none}
+table.grid thead th{position:sticky;top:0;background:#fcfbf9;z-index:2;font-weight:600;font-size:.7rem;color:var(--ink-2);padding:7px 4px;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap}
+table.grid thead th.today{color:var(--accent)}
+/* first column = goal name, sticky left */
+table.grid .gcol{position:sticky;left:0;background:var(--panel);z-index:1;text-align:left;padding:9px 10px;min-width:150px;max-width:170px}
+table.grid thead .gcol{z-index:3;background:#fcfbf9}
+table.grid .gcol .gt{font-weight:550;font-size:.86rem;line-height:1.2}
+table.grid .gcol .gd{font-size:.7rem;color:var(--ink-2);margin-top:2px}
+/* result column (sticky right-ish, scrolls normally) */
+table.grid .rescol{min-width:66px;padding:6px 8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+table.grid .rescol .rv{font-weight:650;font-size:.84rem}
+table.grid .rescol .rp{font-size:.72rem;font-weight:650}
+/* day cells */
+.cell{width:40px;height:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.95rem;font-weight:600;user-select:none}
+.cell:hover{background:#f3f1ec}
+.cell.logged{background:var(--ok-bg);color:var(--ok)}
+.cell.na{background:var(--miss-bg);color:var(--miss)}
+.cell.missing{color:var(--line-2)}        /* faint dot — clearly "not entered" */
+.cell.future{background:#faf9f6;color:#dcd8cf;cursor:default}
+.cell.val{font-size:.74rem;font-weight:650;color:var(--ink);padding:0 2px;line-height:1.1}
+.cell.val.missing{color:var(--line-2);font-weight:400}
+.cell input{width:40px;height:44px;border:none;border-radius:0;text-align:center;font-size:.72rem;padding:0;background:var(--warn-bg)}
+.gridlegend{display:flex;gap:14px;flex-wrap:wrap;font-size:.74rem;color:var(--ink-2);margin:8px 2px 0}
+.gridlegend span{display:inline-flex;align-items:center;gap:5px}
+.lg{width:14px;height:14px;border-radius:4px;display:inline-block}
+.lg.logged{background:var(--ok-bg);border:1px solid #bfe0cd}
+.lg.missing{background:var(--panel);border:1px dashed var(--line-2)}
+.lg.na{background:var(--miss-bg);border:1px solid var(--line-2)}
+/* count cell shows number of sessions; tap=+1, long/second control via popover */
+.cell.count{flex-direction:column;gap:0;line-height:1}
+.cell.count .n{font-size:.9rem;font-weight:700}
+.cell.count.has{background:var(--ok-bg);color:var(--ok)}
+.jumpbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 2px}
+.jumpbar input{width:auto;flex:0 0 auto;padding:7px 10px}
+.cellpop{position:fixed;z-index:70;background:var(--panel);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);padding:10px;min-width:180px}
+.cellpop h4{margin:0 0 8px;font-size:.9rem}
+.cellpop .r{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0}

@@ -10,8 +10,8 @@ A minimalist, installable, offline web app (PWA) built around **weekly and month
 
 | Tab | Purpose |
 |---|---|
-| **Week** (home) | The hero. The whole Sunday check-in on one page: coverage + score summary, every goal grouped by category with the right inline control, and an optional reflection. Prev/Next navigate any week. |
-| **Month** | Monthly check-in: weekly-goal averages by category, monthly & long-term goals against their own targets (counted once per month), and a monthly reflection. |
+| **Week** (home) | The hero: an interactive **7-day grid** — goals as rows, Mon→Sun as columns. Every cell is editable; tap any cell to fill/correct that day. Already-recorded days are highlighted; missing days show a faint dot and are *not* counted as failures. Prev / This week / Next and a date-jumper reach any week. Coverage (% entered) is shown separately from the performance score. Reflection + "Mark week reviewed" at the bottom (reopenable, stays editable). |
+| **Month** | A functional monthly review: weekly-goal averages by category with **change vs previous month**, a list of the month's weeks (each opens its grid to backfill), monthly & long-term goals showing *recorded / remaining* (tap a count goal to add/remove occurrences — counted once; tap a project to tick milestones), and a monthly reflection you can mark reviewed. |
 | **Progress** | Visualisations — overall trend line, category comparison, strongest/weakest, full target-vs-actual table, and a goal-specific trend picker. |
 | **Goals** | One simple page to add / edit / pause / delete goals and milestones. |
 
