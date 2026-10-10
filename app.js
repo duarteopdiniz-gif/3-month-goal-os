@@ -154,7 +154,17 @@ function viewWeek(){
       <input type="date" id="wk-jump" value="${wk.start}" min="${state.period.start}" max="${state.period.end}" title="Jump to the week of a date">
     </div>`;
 
+  // ---- "fill the gaps" nudge ----
+  const missing=E.missingCells(state.goals,state.entries,wk,asOf);
+  if(missing.length){
+    h+=`<div class="gapbar" id="gapbar"><span>${missing.length} ${missing.length===1?"cell is":"cells are"} still blank for this week.</span>
+      <button class="btn sm" id="fill-gaps">Fill the gaps →</button></div>`;
+  } else {
+    h+=`<div class="gapbar done">✓ Every day up to now has an entry.</div>`;
+  }
+
   // ---- the grid, grouped by category ----
+  const prevWk = idx>0 ? weeks[idx-1] : null;
   for(const c of state.categories){
     const gs=state.goals.filter(g=>g.active!==false && g.cat===c.id && (g.freq==="D"||g.freq==="W"));
     if(!gs.length) continue;
@@ -164,7 +174,7 @@ function viewWeek(){
       <th class="gcol">Goal</th>
       ${days.map(dd=>`<th class="${dd===d?"today":""}">${dShort(dd)}<br>${dNum(dd)}</th>`).join("")}
       <th class="rescol">Result</th></tr></thead><tbody>`;
-    for(const g of gs) h+=gridRow(g, days, wk, asOf, d);
+    for(const g of gs) h+=gridRow(g, days, wk, asOf, d, prevWk);
     h+=`</tbody></table></div>`;
   }
 
@@ -199,17 +209,21 @@ function fmtRange(wk){ const a=new Date(E.parseDate(wk.start)),b=new Date(E.pars
   const o={day:"numeric",month:"short"}; return `${a.toLocaleDateString(undefined,o)} – ${b.toLocaleDateString(undefined,o)}`; }
 
 /* one grid row: goal name + 7 day cells + result summary */
-function gridRow(g, days, wk, asOf, today_){
+function gridRow(g, days, wk, asOf, today_, prevWk){
   g._th=TH;
   const r=E.weeklyResult(g, state.entries, wk, asOf);
   const es=E.entriesFor(g, state.entries, wk.start, wk.end);
   const byDay=E.byDay(es, days);
-  const sub = g.type==="count"? `${g.target} ${g.unit||"/wk"}`
+  const base = g.type==="count"? `${g.target} ${g.unit||"/wk"}`
     : g.type==="boolean"&&g.freq==="D"? "every day"
     : g.type==="boolean"? "once / week"
     : g.type==="meals"? `${g.target} meals/day`
     : g.type==="average"? `avg ${g.lowerIsBetter?"≤":"≥"}${E.fmtMin(g.target)}`
     : g.type==="percentage"? `attend %` : "";
+  // last week's result as faint context (momentum signal)
+  let lastTxt="";
+  if(prevWk){ const pr=E.weeklyResult(g, state.entries, prevWk, prevWk.end);
+    if(pr.score!=null) lastTxt=`<span class="lastwk">last wk ${esc(pr.label)}</span>`; }
   let cells="";
   for(const dd of days){ const future = dd>today_; cells += gridCell(g, dd, byDay[dd], future); }
   const st = r.score==null? "none" : r.status;
@@ -217,7 +231,7 @@ function gridRow(g, days, wk, asOf, today_){
     ? `<span class="rv st none">—</span>`
     : `<div class="rv">${esc(r.label)}</div><div class="rp st ${st}">${E.round(r.score)}%</div>`;
   return `<tr>
-    <td class="gcol"><div class="gt">${esc(g.title)}</div><div class="gd">${sub}</div></td>
+    <td class="gcol"><div class="gt">${esc(g.title)}</div><div class="gd">${base}${lastTxt?" · "+lastTxt:""}</div></td>
     ${cells}
     <td class="rescol">${res}</td></tr>`;
 }
@@ -323,6 +337,84 @@ function avgCellPrompt(g, date, el){
 function armOutside(pop){ pop.addEventListener("click",e=>e.stopPropagation());
   setTimeout(()=>document.addEventListener("click",closePopovers,{once:true}),0); }
 function closePopovers(){ document.querySelectorAll(".cellpop").forEach(p=>p.remove()); }
+
+/* ===== "Fill the gaps": guided one-at-a-time pass over missing cells ===== */
+function fillGaps(){
+  const wk=currentWeek(); const d=today(); const asOf=wk.end<d?wk.end:d;
+  let queue=E.missingCells(state.goals,state.entries,wk,asOf);
+  if(!queue.length){ flash("Nothing missing"); return; }
+  let i=0;
+  const bg=sheet(`<h3>Fill the gaps</h3><div class="small" id="fg-prog"></div><div id="fg-body"></div>`);
+  function finishStep(){ i++; if(i>=queue.length){ bg.remove(); flash("Gaps filled ✓"); render(); } else step(); }
+  function skip(){ finishStep(); }
+  function step(){
+    // recompute remaining each step so edits elsewhere stay consistent
+    const item=queue[i]; const g=goalById(item.goalId); const date=item.date;
+    bg.querySelector("#fg-prog").textContent=`${i+1} of ${queue.length} · ${esc(g.title)} · ${item.weekly?"this week":longDate(date)}`;
+    const body=bg.querySelector("#fg-body"); let inner="";
+    if(g.type==="count"){
+      // count goals are weekly: record total sessions for the week (spread across days as occurrences on the week start)
+      const total=()=>state.entries.filter(e=>e.goalId===g.id&&e.date>=wk.start&&e.date<=wk.end&&e.kind==="logged").length;
+      inner=`<div class="fg-q">How many ${esc(g.unit||"sessions")} this week?</div>
+        <div class="small" style="text-align:center">target ${g.target}</div>
+        <div class="counter" style="justify-content:center;margin:12px 0"><button id="fg-dec">−</button><span class="v" id="fg-n">${total()}</span><button id="fg-inc">＋</button></div>
+        <button class="btn" id="fg-save">Save & next</button>
+        <button class="btn ghost" id="fg-skip">Skip</button>`;
+      body.innerHTML=inner;
+      body.querySelector("#fg-inc").onclick=()=>{ addOccurrence(g.id, item.weekly? wk.start : date); body.querySelector("#fg-n").textContent=total(); };
+      body.querySelector("#fg-dec").onclick=()=>{ const list=state.entries.filter(e=>e.goalId===g.id&&e.date>=wk.start&&e.date<=wk.end&&e.kind==="logged").sort((a,b)=>a.ts-b.ts); if(list.length){ state.entries=state.entries.filter(e=>e.id!==list[list.length-1].id); save(); } body.querySelector("#fg-n").textContent=total(); };
+      body.querySelector("#fg-save").onclick=()=>finishStep();
+      body.querySelector("#fg-skip").onclick=skip;
+    } else if(g.type==="boolean"){
+      inner=`<div class="fg-q">${esc(g.title)} — ${item.weekly?"this week":`${dShort(date)} ${dNum(date)}`}?</div>
+        <div class="rowbtn" style="justify-content:center;margin:12px 0">
+          <button class="btn sm" id="fg-yes">✓ Done</button>
+          <button class="btn sec sm" id="fg-no">Not done</button></div>
+        <button class="btn ghost" id="fg-skip">Skip</button>`;
+      body.innerHTML=inner;
+      body.querySelector("#fg-yes").onclick=()=>{ item.weekly? addOccurrence(g.id,wk.start) : setDayState(g.id,date,"logged"); finishStep(); };
+      body.querySelector("#fg-no").onclick=()=>{ item.weekly? void 0 : setDayState(g.id,date,"na"); finishStep(); };
+      body.querySelector("#fg-skip").onclick=skip;
+    } else if(g.type==="average"){
+      inner=`<div class="fg-q">${esc(g.title)} — ${dShort(date)} ${dNum(date)}</div>
+        <div class="small" style="margin:4px 0 6px">Minutes (e.g. 150 = 2h 30m)</div>
+        <input type="number" inputmode="numeric" id="fg-av" placeholder="minutes">
+        <div style="height:10px"></div><button class="btn" id="fg-save">Save & next</button>
+        <button class="btn ghost" id="fg-skip">Skip (leave missing)</button>`;
+      body.innerHTML=inner;
+      const inp=body.querySelector("#fg-av"); inp.focus();
+      body.querySelector("#fg-save").onclick=()=>{ const v=inp.value.trim(); if(v!=="") setValue(g.id,date,{value:Number(v)}); finishStep(); };
+      inp.onkeydown=e=>{ if(e.key==="Enter") body.querySelector("#fg-save").click(); };
+      body.querySelector("#fg-skip").onclick=skip;
+    } else if(g.type==="meals"){
+      const get=()=>state.entries.find(x=>x.goalId===g.id&&x.date===date&&x.kind!=="na");
+      const items=[["b","Breakfast"],["l","Lunch"],["d","Dinner"],["s","Snack"]];
+      const paint=()=>{ const e=get(); const m=(e&&e.meals)||{};
+        body.innerHTML=`<div class="fg-q">${esc(g.title)} — ${dShort(date)} ${dNum(date)}</div>
+          <div class="chips" style="margin:10px 0">${items.map(([k,lab])=>`<button class="chip ${m[k]?"on":""}" data-mk="${k}">${lab}</button>`).join("")}</div>
+          <button class="btn" id="fg-save">Save & next</button>
+          <button class="btn ghost" id="fg-na">N/A that day & next</button>
+          <button class="btn ghost" id="fg-skip">Skip</button>`;
+        body.querySelectorAll("[data-mk]").forEach(b=>b.onclick=()=>{ let e=get(); if(!e){ e=mkEntry(g.id,date,{meals:{}}); state.entries.push(e); } e.kind="logged"; e.meals=e.meals||{}; e.meals[b.dataset.mk]=!e.meals[b.dataset.mk]; save(); paint(); });
+        body.querySelector("#fg-save").onclick=()=>finishStep();
+        body.querySelector("#fg-na").onclick=()=>{ setDayState(g.id,date,"na"); finishStep(); };
+        body.querySelector("#fg-skip").onclick=skip;
+      };
+      paint();
+    } else if(g.type==="percentage"){
+      inner=`<div class="fg-q">${esc(g.title)} — this week</div>
+        <label class="fld">Attended / participated</label><input type="number" inputmode="numeric" id="fg-a" placeholder="9">
+        <label class="fld">Total classes</label><input type="number" inputmode="numeric" id="fg-t" placeholder="10">
+        <div style="height:10px"></div><button class="btn" id="fg-save">Save & next</button>
+        <button class="btn ghost" id="fg-skip">Skip</button>`;
+      body.innerHTML=inner;
+      body.querySelector("#fg-save").onclick=()=>{ const a=body.querySelector("#fg-a").value, t=body.querySelector("#fg-t").value;
+        if(a!=="") setValue(g.id,wk.start,{value:Number(a),total:t!==""?Number(t):undefined}); finishStep(); };
+      body.querySelector("#fg-skip").onclick=skip;
+    } else { finishStep(); }
+  }
+  step();
+}
 
 /* percentage editor (class participation) */
 function editPct(goalId){
@@ -553,6 +645,7 @@ function bind(){
   // count +/-
   // grid cells (weekly check-in)
   document.querySelectorAll("[data-cell]").forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); onCellClick(el.dataset.cell, el); });
+  const fg=document.getElementById("fill-gaps"); if(fg) fg.onclick=fillGaps;
   // week navigation + jump
   const wt=document.getElementById("wk-this"); if(wt) wt.onclick=()=>{ const wk=E.weekForDate(today(),state.period); viewWeekStart=wk?wk.start:null; render(); };
   const wj=document.getElementById("wk-jump"); if(wj) wj.onchange=()=>{ const w=E.weekForDate(wj.value,state.period); if(w){ viewWeekStart=w.start; render(); } };

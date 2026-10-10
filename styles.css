@@ -214,3 +214,22 @@ table.grid .rescol .rp{font-size:.72rem;font-weight:650}
 .cellpop{position:fixed;z-index:70;background:var(--panel);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);padding:10px;min-width:180px}
 .cellpop h4{margin:0 0 8px;font-size:.9rem}
 .cellpop .r{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0}
+
+/* fill-the-gaps nudge bar */
+.gapbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  background:var(--warn-bg);border:1px solid #ecd9a6;border-radius:9px;padding:9px 12px;margin:4px 0 2px;font-size:.86rem;color:#7a5600}
+.gapbar.done{background:var(--ok-bg);border-color:#bfe0cd;color:var(--ok)}
+.fg-q{font-size:1rem;font-weight:600;text-align:center;margin-top:4px}
+.lastwk{color:var(--ink-2);opacity:.85}
+
+/* mobile grid: subtle scroll affordance + tighter name column */
+.gridscroll{position:relative}
+.gridscroll::after{content:"";position:absolute;top:0;right:0;bottom:0;width:22px;pointer-events:none;
+  background:linear-gradient(to right,rgba(255,255,255,0),rgba(255,255,255,.9));border-radius:0 var(--radius) var(--radius) 0}
+@media(min-width:620px){ .gridscroll::after{display:none} }
+@media(max-width:430px){
+  table.grid .gcol{min-width:118px;max-width:124px}
+  table.grid .gcol .gt{font-size:.82rem}
+  .cell{width:36px}
+  table.grid .rescol{min-width:58px}
+}

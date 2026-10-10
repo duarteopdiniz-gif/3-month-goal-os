@@ -119,5 +119,30 @@ const t2=E.fmt(new Date());
 entries=[0,1,2,3].map(n=>E2("cre",E.fmt(E.addDays(new Date(),-n))));
 ok("4-day streak", E.booleanStreak(cre,entries,t2)===4, String(E.booleanStreak(cre,entries,t2)));
 
+console.log("\n[missingCells] blanks for elapsed days only");
+const mcGoals=[
+  {id:"gym",cat:"m",type:"count",freq:"W",target:3,active:true},
+  {id:"cre",cat:"m",type:"boolean",freq:"D",target:1,active:true},
+  {id:"cls",cat:"m",type:"percentage",freq:"W",target:100,active:true},
+];
+let mcE=[ E2("gym","2026-10-06"), E2("cre","2026-10-05") ]; // gym Tue, creatine Mon
+let mc=E.missingCells(mcGoals, mcE, w, sunday);
+// gym is count → weekly single-shot, has data → 0 missing; creatine per-day → Tue..Sun = 6; cls weekly → 1
+const gymMiss=mc.filter(x=>x.goalId==="gym").length, creMiss=mc.filter(x=>x.goalId==="cre").length, clsMiss=mc.filter(x=>x.goalId==="cls").length;
+ok("gym count has data → 0 missing slots", gymMiss===0, String(gymMiss));
+ok("creatine 6 blank days", creMiss===6, String(creMiss));
+ok("class weekly 1 missing slot", clsMiss===1, String(clsMiss));
+// a count goal with NO data this week → exactly 1 weekly slot
+let mc0=E.missingCells([{id:"gym2",cat:"m",type:"count",freq:"W",target:3,active:true}], [], w, sunday);
+ok("empty count goal → 1 weekly slot", mc0.length===1 && mc0[0].weekly===true, JSON.stringify(mc0));
+// only elapsed days: as of Wednesday, fewer blanks
+let mc2=E.missingCells(mcGoals, mcE, w, "2026-10-07");
+ok("as of Wed, creatine blanks = Tue,Wed = 2", mc2.filter(x=>x.goalId==="cre").length===2, String(mc2.filter(x=>x.goalId==="cre").length));
+// coverage never exceeds 100% even with future-dated entries
+let covGoals=[{id:"scr",cat:"m",type:"average",freq:"W",target:180,lowerIsBetter:true,active:true}];
+let covE=[E2("scr","2026-10-05",{value:100}),E2("scr","2026-10-06",{value:100}),E2("scr","2026-10-11",{value:100})]; // Sun is future vs Fri
+let cvg=E.weekCoverage(covGoals,covE,w,"2026-10-09"); // as of Friday
+ok("coverage capped ≤100% (future entries ignored)", cvg.pct<=100 && cvg.have<=cvg.need, JSON.stringify(cvg));
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`);
 process.exit(fail?1:0);

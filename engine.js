@@ -243,15 +243,46 @@ function overallWeekly(goals, entries, week, today, th, FREQ_WEIGHT, CATEGORIES)
   return { score, status: score==null?"none":statusOf(score,th), cats:scored, allCats:all };
 }
 
-/* Coverage across all D/W goals in a week: how many expected entries exist. */
+/* A goal is "per-day" (expects an entry on each day) vs "weekly single-shot"
+ * (one value/decision for the whole week). Daily booleans, screen-time
+ * averages, and meals are per-day. Count goals (gym 3/wk), weekly booleans
+ * and percentages are weekly single-shot — one expected slot per week. */
+function isPerDay(g){ return (g.type==="boolean"&&g.freq==="D") || g.type==="average" || g.type==="meals"; }
+
+/* Coverage across all D/W goals in a week: expected vs provided, elapsed days
+ * only, capped so it can never exceed 100%. */
 function weekCoverage(goals, entries, week, today){
+  const elapsed=daysInWeek(week).filter(d=> d<=today);
   let have=0, need=0;
   for(const g of goals.filter(x=>x.active!==false && (x.freq==="D"||x.freq==="W"))){
-    const r=weeklyResult(g, entries, week, today);
-    if(r.coverage){ have+=r.coverage.have||0; need+=r.coverage.need||0; }
-    else { need+=1; if(r.hasData) have+=1; } // weekly single-shot goals
+    if(isPerDay(g)){
+      const es=entriesFor(g,entries,week.start,week.end);
+      const bd=byDay(es, daysInWeek(week));
+      for(const d of elapsed){ need+=1; if(bd[d] && bd[d].state!=="missing") have+=1; }
+    } else {
+      need+=1; if(entriesFor(g,entries,week.start,week.end).some(e=>e.date<=today && (e.kind==="logged"||e.kind==="na"))) have+=1;
+    }
   }
+  if(have>need) have=need;
   return { have, need, pct: need? round(have/need*100):100 };
+}
+
+/* missingCells: blanks that need attention this week (elapsed days only).
+ * Per-day goals → each blank elapsed day. Weekly single-shot (count, weekly
+ * boolean, percentage) → one slot if nothing is recorded yet. */
+function missingCells(goals, entries, week, today){
+  const out=[]; const elapsed=daysInWeek(week).filter(d=> d<=today);
+  for(const g of goals.filter(x=>x.active!==false && (x.freq==="D"||x.freq==="W"))){
+    if(isPerDay(g)){
+      const es=entriesFor(g,entries,week.start,week.end);
+      const bd=byDay(es, daysInWeek(week));
+      for(const d of elapsed){ if(bd[d] && bd[d].state==="missing") out.push({goalId:g.id, date:d}); }
+    } else {
+      const any=entriesFor(g,entries,week.start,week.end).some(e=>e.date<=today);
+      if(!any) out.push({goalId:g.id, date: week.start, weekly:true});
+    }
+  }
+  return out;
 }
 
 /* ------------------------------- streaks -------------------------------- */
@@ -291,7 +322,7 @@ const Engine = {
   buildWeeks, weekForDate, daysInWeek, daysElapsedInWeek,
   monthsInPeriod, monthKeyOf, monthRange,
   statusOf, entriesFor, weeklyResult, periodResult, result, byDay,
-  categoryWeekly, overallWeekly, weekCoverage,
+  categoryWeekly, overallWeekly, weekCoverage, missingCells,
   booleanStreak, weeklyTrend, categoryTrend, fmtMin,
 };
 if (typeof module !== "undefined") module.exports = Engine;

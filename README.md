@@ -75,6 +75,13 @@ See `ARCHITECTURE.md` for the data model, scoring details, and the optional Noti
 
 ---
 
+## Review quality-of-life (Tier 1)
+
+- **Fill the gaps** — the Week tab shows how many cells are still blank for elapsed days and offers a guided one-at-a-time pass that walks only the missing cells (one tap each). Screen-time entry chains day→day in a single flow.
+- **Coverage** is capped at 100% and counts only days that have actually happened (never treats a future day as expected).
+- **Last-week context** — each goal row shows its previous week's result faintly, as a momentum signal.
+- **Mobile grid polish** — a scroll affordance on the right edge and a tighter goal-name column so Fri–Sun are easy to reach on a phone.
+
 ## Verified
 
-All 26 engine tests pass, and the full UI was browser-tested against the 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.
+All 32 engine tests pass, and the full UI was browser-tested against the 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.
