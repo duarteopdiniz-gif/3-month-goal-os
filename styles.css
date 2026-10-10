@@ -233,3 +233,32 @@ table.grid .rescol .rp{font-size:.72rem;font-weight:650}
   .cell{width:36px}
   table.grid .rescol{min-width:58px}
 }
+
+/* 13-week status strip (Progress) */
+.weekstrip{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0 4px}
+.wsdot{flex:1 1 auto;min-width:28px;height:30px;border-radius:7px;border:1px solid var(--line-2);background:var(--panel);
+  color:var(--ink-2);font-size:.72rem;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums}
+.wsdot.reviewed{background:var(--accent);border-color:var(--accent);color:#fff}
+.wsdot.full{background:var(--ok-bg);border-color:#bfe0cd;color:var(--ok)}
+.wsdot.partial{background:var(--warn-bg);border-color:#ecd9a6;color:#7a5600}
+.wsdot.empty{background:var(--panel);border-style:dashed;color:var(--line-2)}
+.wsdot.current{background:#fff;border-color:var(--accent);color:var(--accent)}
+.wsdot.future{opacity:.45;cursor:default}
+.weekstrip-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:.72rem;color:var(--ink-2);margin:4px 2px 2px}
+.weekstrip-legend span{display:inline-flex;align-items:center;gap:5px}
+.ws{width:12px;height:12px;border-radius:4px;display:inline-block;border:1px solid var(--line-2)}
+.ws.reviewed{background:var(--accent);border-color:var(--accent)}
+.ws.full{background:var(--ok-bg);border-color:#bfe0cd}
+.ws.partial{background:var(--warn-bg);border-color:#ecd9a6}
+.ws.empty{background:var(--panel);border-style:dashed}
+.ws.future{background:#eee}
+
+/* catch-up prompts */
+.catchup{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:9px;padding:11px 13px;margin:12px 0}
+.catchrow{display:block;width:100%;text-align:left;background:none;border:none;border-top:1px solid var(--line);
+  padding:8px 0;font-size:.86rem;color:var(--accent);cursor:pointer}
+.catchrow:first-of-type{border-top:none}
+
+/* computed insights */
+.insights{margin:14px 0 4px}
+.insight{background:var(--accent-soft);border-radius:8px;padding:9px 12px;font-size:.88rem;margin-bottom:6px;color:var(--ink)}

@@ -539,6 +539,30 @@ function viewProgress(){
   let h=`<div class="summary"><div><div class="bignum ${overall==null?"none":""}">${overall==null?"—":E.round(overall)+"%"}</div>
     <div class="sub">Overall · avg of ${done.length} reviewed week${done.length===1?"":"s"} · ${state.period.start} → ${state.period.end}</div></div></div>`;
 
+  // 13-week status strip
+  const statuses=E.weekStatuses(state.goals,state.entries,state.reviews,state.period,d);
+  h+=`<div class="weekstrip">${statuses.map(s=>`<button class="wsdot ${s.status}" data-openweek="${s.start}" title="Week ${s.index} · ${s.status}">${s.index}</button>`).join("")}</div>
+    <div class="weekstrip-legend">
+      <span><i class="ws reviewed"></i>reviewed</span>
+      <span><i class="ws full"></i>fully entered</span>
+      <span><i class="ws partial"></i>partial</span>
+      <span><i class="ws empty"></i>empty</span>
+      <span><i class="ws future"></i>upcoming</span></div>`;
+
+  // catch-up prompts: PAST weeks (not current) that are incomplete and unreviewed
+  const catchup=statuses.filter(s=>!s.future && !s.current && !s.reviewed && (s.status==="partial"||s.status==="empty"));
+  if(catchup.length){
+    h+=`<div class="catchup"><div class="small" style="font-weight:600;margin-bottom:6px">Weeks that still need attention</div>`;
+    for(const s of catchup.slice(0,4)) h+=`<button class="catchrow" data-openweek="${s.start}">Week ${s.index} · ${fmtRange({start:s.start,end:s.end})} — ${s.status==="empty"?"nothing entered":s.coverage.pct+"% entered"} →</button>`;
+    h+=`</div>`;
+  }
+
+  // computed plain-language insights
+  const ins=E.insights(state.goals,state.entries,state.period,d,TH,FW,state.categories,4);
+  if(ins.length){
+    h+=`<div class="insights">${ins.map(t=>`<div class="insight">${esc(t)}</div>`).join("")}</div>`;
+  }
+
   // main trend chart
   h+=`<h2 class="sec">Weekly performance over the 3 months</h2>
     <div class="chartwrap">${lineChart(trend.map(t=>({x:t.week,y:t.score,future:t.future})),"W")}
@@ -655,9 +679,10 @@ function bind(){
   const wc=document.getElementById("wk-complete"); if(wc) wc.onclick=()=>saveWeek(true);
   const wso=document.getElementById("wk-saveonly"); if(wso) wso.onclick=()=>saveWeek(false);
 
+  // open a specific week from Month or Progress (status strip / catch-up)
+  document.querySelectorAll("[data-openweek]").forEach(el=>el.onclick=()=>{ viewWeekStart=el.dataset.openweek; go("week"); });
   // month
   document.querySelectorAll("[data-mo]").forEach(b=>b.onclick=()=>{ viewMonthKey=b.dataset.mo; render(); });
-  document.querySelectorAll("[data-openweek]").forEach(el=>el.onclick=()=>{ viewWeekStart=el.dataset.openweek; go("week"); });
   document.querySelectorAll("[data-month-goal]").forEach(el=>el.onclick=()=>{ const [gid,mk]=el.dataset.monthGoal.split(":"); monthGoalEditor(gid,mk); });
   const ms=document.getElementById("mo-save"); if(ms) ms.onclick=()=>saveMonth(ms.dataset.key);
 
@@ -692,7 +717,34 @@ function saveMonth(key){
   let rec=monthReview(key);
   const snap={ type:"monthly", key, score:n?sum/n:null, answers, completed:true, updatedAt:todayStr() };
   if(rec) Object.assign(rec,snap); else state.reviews.push(snap);
-  save(); flash("Monthly review saved ✓"); render();
+  save(); flash("Monthly review saved ✓");
+  // data safety: offer a backup download after a monthly review
+  offerBackup("You just completed a monthly review. Download a backup of your data?");
+  render();
+}
+
+/* ---- data-safety backup ---- */
+function doExport(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download=`goal-backup-${todayStr()}.json`; a.click(); URL.revokeObjectURL(a.href);
+  state.settings=state.settings||{}; state.settings.lastBackup=todayStr(); save();
+}
+function offerBackup(msg){
+  const bg=sheet(`<h3>Back up your data</h3><div class="small" style="margin:6px 0 12px">${esc(msg)} Your data lives only on this device, so a backup protects you if the browser storage is cleared.</div>
+    <button class="btn" id="bk-yes">Download backup (JSON)</button>
+    <button class="btn ghost" id="bk-no">Not now</button>`);
+  bg.querySelector("#bk-yes").onclick=()=>{ doExport(); bg.remove(); flash("Backup downloaded"); };
+  bg.querySelector("#bk-no").onclick=()=>{ bg.remove(); };
+}
+/* gentle reminder if no backup in 30+ days (checked on boot) */
+function maybeBackupReminder(){
+  const last=state.settings&&state.settings.lastBackup;
+  const hasData=state.entries.length>0;
+  if(!hasData) return;
+  if(!last){ /* first-time: don't nag immediately */ return; }
+  const days=(E.parseDate(today())-E.parseDate(last))/86400000;
+  if(days>=30) offerBackup("It's been over a month since your last backup.");
 }
 
 /* =========================================================================
@@ -774,6 +826,7 @@ function openSettings(){
     <button class="btn sec" id="s-example">Load realistic example data</button>
     <button class="btn ghost" id="s-clear" style="margin-top:8px">Clear all entries (keep goals)</button>
     <button class="btn sec" id="s-export" style="margin-top:8px">Export backup (JSON)</button>
+    <div class="small" style="margin-top:6px">${state.settings&&state.settings.lastBackup?`Last backup: ${state.settings.lastBackup}`:"No backup yet — your data lives only on this device."}</div>
     <label class="fld">Import JSON</label><input id="s-import" type="file" accept="application/json">
     <button class="btn danger" id="s-reset" style="margin-top:14px">Reset to 25 seed goals</button>
     <div style="height:12px"></div><button class="btn" id="s-save">Save</button>`);
@@ -781,7 +834,7 @@ function openSettings(){
     setVToday(bg.querySelector("#s-vtoday").value||null); viewWeekStart=null; viewMonthKey=null; save(); bg.remove(); flash("Saved"); render(); };
   bg.querySelector("#s-example").onclick=()=>{ loadExample(); bg.remove(); flash("Example data loaded"); render(); };
   bg.querySelector("#s-clear").onclick=()=>{ if(confirm("Delete all entries?")){ state.entries=[]; state.reviews=[]; save(); bg.remove(); flash("Cleared"); render(); } };
-  bg.querySelector("#s-export").onclick=()=>{ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`goal-backup-${todayStr()}.json`; a.click(); flash("Exported"); };
+  bg.querySelector("#s-export").onclick=()=>{ doExport(); flash("Exported"); };
   bg.querySelector("#s-import").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ state=migrate(JSON.parse(r.result)); state.goals.forEach(g=>g._th=TH); save(); bg.remove(); flash("Imported"); render(); }catch(err){ flash("Invalid file"); } }; r.readAsText(f); };
   bg.querySelector("#s-reset").onclick=()=>{ if(confirm("Reset everything to seed?")){ state=seedState(); setVToday(null); save(); bg.remove(); flash("Reset"); render(); } };
 }
@@ -846,5 +899,6 @@ function boot(){ // default to viewing the week that contains "today"
   const wk=E.weekForDate(today(),state.period); if(wk) viewWeekStart=wk.start;
   render();
   if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  setTimeout(maybeBackupReminder, 800);
 }
 window.addEventListener("DOMContentLoaded", boot);

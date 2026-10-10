@@ -1,5 +1,5 @@
 /* Service worker — offline cache so the app works with no network. */
-const CACHE = "goal-os-v4";
+const CACHE = "goal-os-v5";
 const ASSETS = [
   "./", "./index.html", "./styles.css",
   "./seed.js", "./engine.js", "./app.js",

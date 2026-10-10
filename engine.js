@@ -312,6 +312,71 @@ function categoryTrend(catId, goals, entries, period, today, th, FREQ_WEIGHT){
   });
 }
 
+/* Per-week status for the 13-dot strip & catch-up prompts.
+ * reviewed: a weekly review marked completed exists.
+ * partial:  past/current week with some but not full data coverage.
+ * empty:    past/current week with no data at all.
+ * current:  the week containing today (if not reviewed).
+ * future:   starts after today.
+ * reviews = state.reviews array. */
+function weekStatuses(goals, entries, reviews, period, today){
+  return buildWeeks(period).map(w=>{
+    const future = parseDate(w.start) > parseDate(today);
+    const isCurrent = today>=w.start && today<=w.end;
+    const rv = reviews.find(r=>r.type==="weekly" && r.key===w.start && r.completed);
+    let status;
+    if(future) status="future";
+    else if(rv) status="reviewed";
+    else {
+      const asOf = w.end<today ? w.end : today;
+      const cov = weekCoverage(goals, entries, w, asOf);
+      status = cov.have===0 ? "empty" : cov.pct>=100 ? "full" : "partial";
+      if(isCurrent && status==="empty") status="current";
+    }
+    const asOf = future? null : (w.end<today?w.end:today);
+    const cov = future? {pct:0,have:0,need:0} : weekCoverage(goals,entries,w,asOf);
+    return { index:w.index, start:w.start, end:w.end, status, coverage:cov, current:isCurrent, future, reviewed:!!rv };
+  });
+}
+
+/* Plain-language insights computed from the data (max `limit`). */
+function insights(goals, entries, period, today, th, FREQ_WEIGHT, CATEGORIES, limit=4){
+  const out=[];
+  const weeks=buildWeeks(period).filter(w=>parseDate(w.start)<=parseDate(today));
+  if(weeks.length<1) return out;
+
+  // helper: per-goal weekly score series (only weeks with data)
+  const series=(g)=> weeks.map(w=>({w:w.index, r:weeklyResult(g,entries,w,w.end<today?w.end:today)}))
+                         .filter(x=>x.r.score!=null);
+
+  // 1) overall direction over last up-to-3 reviewed/scored weeks
+  const trend=weeklyTrend(goals,entries,period,today,th,FREQ_WEIGHT,CATEGORIES).filter(t=>!t.future && t.score!=null);
+  if(trend.length>=2){
+    const a=trend[Math.max(0,trend.length-3)].score, b=trend[trend.length-1].score;
+    const diff=b-a;
+    if(Math.abs(diff)>=5) out.push(`Your overall weekly score is ${diff>0?"trending up":"slipping"} (${round(a)}% → ${round(b)}% recently).`);
+    else out.push(`Your overall weekly score is holding steady around ${round(b)}%.`);
+  }
+
+  // 2) most-improved weekly goal (first vs last scored week)
+  const dw=goals.filter(g=>g.active!==false && (g.freq==="D"||g.freq==="W"));
+  let bestImp=null, worstMiss=null, mostConsistent=null;
+  for(const g of dw){
+    const s=series(g); if(s.length<2) continue;
+    const delta=s[s.length-1].r.score - s[0].r.score;
+    if(!bestImp || delta>bestImp.delta) bestImp={g,delta, from:s[0].r.score, to:s[s.length-1].r.score};
+    const avg=s.reduce((a,x)=>a+x.r.score,0)/s.length;
+    if(!worstMiss || avg<worstMiss.avg) worstMiss={g,avg};
+    const allGreen=s.every(x=>x.r.score>=th.green);
+    if(allGreen && (!mostConsistent || s.length>mostConsistent.n)) mostConsistent={g,n:s.length};
+  }
+  if(bestImp && bestImp.delta>=10) out.push(`${bestImp.g.title} is improving (${round(bestImp.from)}% → ${round(bestImp.to)}%).`);
+  if(worstMiss && worstMiss.avg<th.yellow) out.push(`${worstMiss.g.title} is your most-missed goal (averaging ${round(worstMiss.avg)}%).`);
+  if(mostConsistent && mostConsistent.n>=2) out.push(`${mostConsistent.g.title} has been on target every scored week — nice consistency.`);
+
+  return out.slice(0,limit);
+}
+
 /* ------------------------------ formatting ------------------------------ */
 function fmtMin(mins){ const m=Math.round(mins); return `${Math.floor(m/60)}h ${String(m%60).padStart(2,"0")}m`; }
 
@@ -323,7 +388,7 @@ const Engine = {
   monthsInPeriod, monthKeyOf, monthRange,
   statusOf, entriesFor, weeklyResult, periodResult, result, byDay,
   categoryWeekly, overallWeekly, weekCoverage, missingCells,
-  booleanStreak, weeklyTrend, categoryTrend, fmtMin,
+  booleanStreak, weeklyTrend, categoryTrend, weekStatuses, insights, fmtMin,
 };
 if (typeof module !== "undefined") module.exports = Engine;
 if (typeof window !== "undefined") window.Engine = Engine;

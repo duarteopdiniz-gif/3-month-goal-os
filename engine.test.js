@@ -144,5 +144,26 @@ let covE=[E2("scr","2026-10-05",{value:100}),E2("scr","2026-10-06",{value:100}),
 let cvg=E.weekCoverage(covGoals,covE,w,"2026-10-09"); // as of Friday
 ok("coverage capped ≤100% (future entries ignored)", cvg.pct<=100 && cvg.have<=cvg.need, JSON.stringify(cvg));
 
+console.log("\n[weekStatuses] classify weeks");
+const wsGoals=[{id:"cre",cat:"m",type:"boolean",freq:"D",target:1,active:true}];
+// week1 fully entered + reviewed; week2 partial; week3 (current-ish) empty
+const weeks13=E.buildWeeks(period);
+const w1=weeks13[0], w2=weeks13[1];
+let wsE=[]; E.daysInWeek(w1).forEach(d=>wsE.push(E2("cre",d))); // week1 all 7 logged
+wsE.push(E2("cre",w2.start)); // week2 only 1 day
+const reviews=[{type:"weekly",key:w1.start,completed:true}];
+let ws=E.weekStatuses(wsGoals,wsE,reviews,period,"2026-10-11");
+ok("week1 reviewed", ws.find(x=>x.index===1).status==="reviewed", ws.find(x=>x.index===1).status);
+ok("week2 partial", ws.find(x=>x.index===2).status==="partial", ws.find(x=>x.index===2).status);
+ok("week5 future", ws.find(x=>x.index===5).status==="future", ws.find(x=>x.index===5).status);
+
+console.log("[insights] produce sentences from data");
+const insGoals=[{id:"gym",cat:"mind",type:"count",freq:"W",target:3,active:true}];
+let insE=[]; // week1: 1 session; week4: 3 sessions → improving
+E.daysInWeek(weeks13[0]).slice(0,1).forEach(d=>insE.push(E2("gym",d)));
+E.daysInWeek(weeks13[3]).slice(0,3).forEach(d=>insE.push(E2("gym",d)));
+const ins=E.insights(insGoals,insE,period,"2026-10-11",th,FW,[{id:"mind",name:"Mind"}],4);
+ok("insights produced", Array.isArray(ins) && ins.length>=1, JSON.stringify(ins));
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`);
 process.exit(fail?1:0);

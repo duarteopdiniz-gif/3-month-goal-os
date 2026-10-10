@@ -82,6 +82,13 @@ See `ARCHITECTURE.md` for the data model, scoring details, and the optional Noti
 - **Last-week context** — each goal row shows its previous week's result faintly, as a momentum signal.
 - **Mobile grid polish** — a scroll affordance on the right edge and a tighter goal-name column so Fri–Sun are easy to reach on a phone.
 
+## Progress & safety (Tier 2)
+
+- **13-week status strip** — a dot per week on Progress: reviewed / fully entered / partial / empty / upcoming. Tap any dot to open that week.
+- **Catch-up prompts** — past weeks that are still incomplete and unreviewed are surfaced on Progress so they don't silently rot.
+- **Plain-language insights** — a few computed sentences ("X is trending up", "Y is your most-missed goal") above the charts.
+- **Data-safety backup** — your data lives only on this device, so completing a monthly review offers a one-tap JSON backup; Settings shows the last-backup date and nudges if it's been 30+ days.
+
 ## Verified
 
-All 32 engine tests pass, and the full UI was browser-tested against the 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.
+All 36 engine tests pass, and the full UI was browser-tested against the 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.
