@@ -132,3 +132,31 @@ Since I can't reach your workspace, if you want me to reuse/upgrade it, share: (
 ## 5. Flexibility (section 18)
 
 Nothing is hardcoded in logic. The 25 goals live in `seed.js` as the *initial dataset*; after first load they're editable state. You can add/remove/pause goals, change targets/frequencies/types, edit milestones & books, add categories (edit `state.categories`), and change the 3-month period — all from the UI, without touching code.
+
+---
+
+## 6. GitHub backup sync (`sync.js`)
+
+Pure, node-testable module (no DOM; all I/O injected). The browser controller (`GH` in `app.js`) wires real `fetch` + `localStorage` and manages debounce/triggers/conflict state.
+
+**Snapshot** = `JSON.stringify(state)` with secrets and volatile/UI fields stripped: `_token`, `settings.ghToken`, `settings.sync` (lastSha bookkeeping — leaving it in would make every push differ and defeat the identical-skip), and `goals[].\_th`.
+
+**Push protocol** (`Sync.push(fetch, repo, token, snapshot, lastSha)`):
+1. GET the file. 404 → treat as "no file yet".
+2. If a file exists and (`lastSha==null` **or** remote `sha !== lastSha`) → **conflict** (don't overwrite); return remote sha + content for the UI to resolve.
+3. If remote content byte-identical to the snapshot → **skip** (no empty commit).
+4. Otherwise PUT with the remote sha as the base. 409/422 → conflict.
+
+**Repo guard:** `checkRepoPrivate` must see `private === true` or it refuses (backups hold personal reflections).
+
+**Conflict resolution** (`GH.resolve`): `remote` restores GitHub's data after copying current local data to `goal-os-v1-prerestore`; `local` re-pushes using the remote sha as base. Auto-push is paused while a conflict is pending and a flag shows in the header (updated without a full `render()` so in-progress typing isn't lost).
+
+**Token storage:** `localStorage["goal-os-v1-ghtoken"]`, separate from state, never exported.
+
+**Triggers:** debounced ~15s after `save()`, immediately after a weekly/monthly review, on `visibilitychange→hidden`, on `online`, and once ~3s after boot.
+
+**Service worker:** same-origin only (cross-origin like the GitHub API is never cached — avoids stale API data and token leakage) and `caches.match(req,{ignoreSearch:true})` so `?tab=` resolves offline.
+
+## 7. ICS reminder (`sync.js` buildICS)
+
+Weekly `VEVENT` with `RRULE:FREQ=WEEKLY;UNTIL=<period end>`, floating local time, a `VALARM` at start, RFC-5545 text escaping and 75-octet line folding. Delivered via `navigator.share({files})` (iOS → Calendar) with a download fallback.

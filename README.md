@@ -82,6 +82,26 @@ See `ARCHITECTURE.md` for the data model, scoring details, and the optional Noti
 - **Last-week context** — each goal row shows its previous week's result faintly, as a momentum signal.
 - **Mobile grid polish** — a scroll affordance on the right edge and a tighter goal-name column so Fri–Sun are easy to reach on a phone.
 
+## Data safety, Today tab & reminders (latest)
+
+**Data safety**
+- On boot the app calls `navigator.storage.persist()` and shows the result in Settings (granted / denied / unsupported). This lowers eviction risk but is **not** a backup.
+- **GitHub backup sync** (logic in `sync.js`, unit-tested in node): point it at a **private** repo (owner/name) + a fine-grained token (Contents: read & write, that one repo). It commits a JSON snapshot to `goal-os-backup.json`, debounced ~15s after any change, plus after reviews, when the tab is hidden, when back online, and shortly after boot.
+  - **Public repos are refused** — backups contain personal reflections.
+  - The **token is stored under its own key** and is never in exports or the backup file; UI-only fields (`g._th`) and volatile sync bookkeeping are stripped from the snapshot.
+  - **Conflict-safe:** it remembers the last synced sha. If the remote changed (another device, or a repo that already had a backup), it does **not** overwrite — it shows a choice (use GitHub's data / use this device's data) and keeps a `goal-os-v1-prerestore` safety copy. Identical content is skipped (no empty commits). A "Backup issue" flag appears in the header; the header updates without a full re-render so it never wipes text you're typing.
+- The service worker ignores cross-origin requests (so GitHub API responses are never cached and tokens can't leak into the cache) and uses `ignoreSearch` so `?tab=` works offline.
+- **Note on the token:** it lives in `localStorage`, readable by any script on the page. For a static app with no third-party scripts this is acceptable; use a single-repo, contents-only, fine-grained token so the blast radius is minimal.
+
+**Today tab (fast logging)**
+- New **Today** tab, first in the nav and the default — except on the last day of the week, which opens on Week (review day). URL routing: `?tab=today|week|month|progress|goals`.
+- Shows only today's goals (Daily / This week / This month) with big tap targets: count steppers, a cycling done→N/A→blank button, meal chips, a screen-time input that saves without a full re-render, and an Edit button for class %. Writes the **same entries** as the Week grid — no duplicates. Respects the "treat today as" virtual date.
+- `manifest.webmanifest` shortcuts: "Log today" and "Weekly review". **iOS ignores manifest shortcuts** — instead add an iOS Shortcut (Shortcuts → Automation, or a Home Screen shortcut) that opens `…/index.html?tab=today`.
+
+**Reminders**
+- In-app banner on Today & Week: "last day of the week — time for your review" (if unreviewed), or "last week hasn't been reviewed", with a button that jumps to that week. Hidden on the Week tab when already viewing that week.
+- Settings → Weekly review reminder: pick a day + time and generate a repeating `.ics` (weekly RRULE until the period end, floating local time, VALARM at start, RFC-5545 folding/escaping). Uses `navigator.share({files})` first (iOS share sheet → Calendar), falls back to a download.
+
 ## Progress & safety (Tier 2)
 
 - **13-week status strip** — a dot per week on Progress: reviewed / fully entered / partial / empty / upcoming. Tap any dot to open that week.
@@ -91,4 +111,4 @@ See `ARCHITECTURE.md` for the data model, scoring details, and the optional Noti
 
 ## Verified
 
-All 36 engine tests pass, and the full UI was browser-tested against the 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.
+All 36 engine tests + 26 sync tests (`node engine.test.js`, `node sync.test.js`) pass, and the full UI was browser-tested (23 assertions) covering the Today tab (default routing, single-source logging, no-rerender average input), GitHub sync (private-repo check, push, token isolation, identical-skip, conflict detection + restore with safety copy), and reminders. The original 8 required scenarios: log-Tuesday-shows-Sunday, add-Thursday-no-duplicate, blank-stays-missing, historical edit recalculates, reopen review stays editable, week navigation preserves data, multiple-same-day counts, and monthly-no-double-count — with zero console errors.
