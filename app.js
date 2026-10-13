@@ -254,6 +254,9 @@ function viewToday(){
     <div style="text-align:right"><div class="coverage" id="today-counter">${loggedToday}/${dailyGoals.length} daily habits logged</div></div></div>`;
 
   h+=reminderBanner("today");
+  // at-risk nudge: weekly goals that can still be saved today
+  const risk=E.atRiskGoals(state.goals,state.entries,wk,d,TH);
+  if(risk.length) h+=`<div class="atrisk">⚠ ${risk.map(r=>esc(r.goal.title)).join(", ")} ${risk.length===1?"is":"are"} slipping out of reach this week.</div>`;
 
   // --- Daily ---
   if(dailyGoals.length){
@@ -285,6 +288,26 @@ function updateTodayCounter(){
   const d=today(); const dailyGoals=state.goals.filter(g=>g.active!==false && g.freq==="D");
   const logged=dailyGoals.filter(g=> state.entries.some(x=>x.goalId===g.id&&x.date===d)).length;
   el.textContent=`${logged}/${dailyGoals.length} daily habits logged`;
+}
+
+/* scoring readability (#4): headline line, what dragged it down, at-risk flags */
+function scoreHeadline(wk, asOf, o, cov){
+  if(o.score==null) return `<div class="headline">No data entered for this week yet — log something to see your score.</div>`;
+  let h=`<div class="headline"><b>This week: ${E.round(o.score)}%</b> · ${cov.have}/${cov.need} logged</div>`;
+  // biggest drag(s)
+  const bd=E.scoreBreakdown(state.goals,state.entries,wk,asOf,TH,FW,state.categories);
+  if(bd.items.length){
+    const top=bd.items[0];
+    h+=`<div class="drag">${esc(top.goal.title)} cost you ${E.round(top.cost)} point${E.round(top.cost)===1?"":"s"} (${top.label}).`;
+    if(bd.items[1] && E.round(bd.items[1].cost)>=1) h+=` Next: ${esc(bd.items[1].goal.title)} (−${E.round(bd.items[1].cost)}).`;
+    h+=`</div>`;
+  }
+  // at-risk (mid-week only)
+  const risk=E.atRiskGoals(state.goals,state.entries,wk,asOf,TH);
+  if(risk.length){
+    h+=`<div class="atrisk">⚠ At risk: ${risk.map(r=>`${esc(r.goal.title)} — ${esc(r.reason)}`).join("; ")}</div>`;
+  }
+  return h;
 }
 
 /* in-app reminder banner (Batch 3). tab = 'today' | 'week'. */
@@ -376,6 +399,9 @@ function viewWeek(){
     <div style="text-align:right">
       <div class="coverage"><b>${cov.pct}%</b> of this week's data entered<br><span class="small">${cov.have}/${cov.need} expected entries</span></div>
     </div></div>`;
+
+  // headline + what dragged it down (#4)
+  h+=scoreHeadline(wk, asOf, o, cov);
   h+=reminderBanner("week");
   h+=`<div class="jumpbar">
       <button class="btn sec sm" id="wk-prev" ${idx<=0?"disabled":""}>‹ Prev</button>

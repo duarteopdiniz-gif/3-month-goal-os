@@ -144,6 +144,31 @@ let covE=[E2("scr","2026-10-05",{value:100}),E2("scr","2026-10-06",{value:100}),
 let cvg=E.weekCoverage(covGoals,covE,w,"2026-10-09"); // as of Friday
 ok("coverage capped ≤100% (future entries ignored)", cvg.pct<=100 && cvg.have<=cvg.need, JSON.stringify(cvg));
 
+console.log("\n[scoreBreakdown] attributes points to the dragging goal");
+// one category, two weekly count goals: A perfect (3/3), B poor (1/3)
+const sbGoals=[
+  {id:"A",cat:"c",type:"count",freq:"W",target:3,active:true},
+  {id:"B",cat:"c",type:"count",freq:"W",target:3,active:true},
+];
+let sbE=[E2("A","2026-10-05"),E2("A","2026-10-06"),E2("A","2026-10-07"), E2("B","2026-10-05")];
+const CATS=[{id:"c",name:"C"}];
+let sb=E.scoreBreakdown(sbGoals,sbE,w,sunday,th,FW,CATS);
+ok("breakdown lists B (the drag), not A", sb.items.length===1 && sb.items[0].goal.id==="B", JSON.stringify(sb.items.map(i=>i.goal.id)));
+// A=100,B=33.3, equal weight → overall 66.7; if B were 100 → overall 100 → cost ~33.3
+ok("B cost ~33 points", Math.abs(sb.items[0].cost-33.3)<1.5, "cost="+sb.items[0].cost);
+
+console.log("[atRiskGoals] count goal that can't be reached flags; reachable doesn't");
+// Friday of the week → remaining days = Sat,Sun = 2. gym 0/3 → max 0+2=2 < 3 → at risk
+let riskE=[]; let risk=E.atRiskGoals([{id:"gym",cat:"c",type:"count",freq:"W",target:3,active:true}],riskE,w,"2026-10-09",th);
+ok("gym 0/3 on Fri → at risk", risk.length===1 && risk[0].goal.id==="gym", JSON.stringify(risk.map(r=>r.goal.id)));
+// gym 2/3 on Fri → max 2+2=4 ≥3 → NOT at risk
+let riskE2=[E2("gym","2026-10-05"),E2("gym","2026-10-06")];
+let risk2=E.atRiskGoals([{id:"gym",cat:"c",type:"count",freq:"W",target:3,active:true}],riskE2,w,"2026-10-09",th);
+ok("gym 2/3 on Fri → not at risk", risk2.length===0, JSON.stringify(risk2));
+// on Sunday (0 days left) a 1/3 goal is unreachable → at risk
+let risk3=E.atRiskGoals([{id:"gym",cat:"c",type:"count",freq:"W",target:3,active:true}],[E2("gym","2026-10-05")],w,sunday,th);
+ok("gym 1/3 on Sun (0 left) → at risk", risk3.length===1, JSON.stringify(risk3));
+
 console.log("\n[weekStatuses] classify weeks");
 const wsGoals=[{id:"cre",cat:"m",type:"boolean",freq:"D",target:1,active:true}];
 // week1 fully entered + reviewed; week2 partial; week3 (current-ish) empty

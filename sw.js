@@ -1,6 +1,6 @@
 /* Service worker — offline cache. Same-origin only (never cache the GitHub API
  * or any cross-origin response — that would break sync and could cache tokens). */
-const CACHE = "goal-os-v6";
+const CACHE = "goal-os-v7";
 const ASSETS = [
   "./", "./index.html", "./styles.css",
   "./seed.js", "./engine.js", "./sync.js", "./app.js",

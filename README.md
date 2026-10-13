@@ -102,6 +102,12 @@ See `ARCHITECTURE.md` for the data model, scoring details, and the optional Noti
 - In-app banner on Today & Week: "last day of the week — time for your review" (if unreviewed), or "last week hasn't been reviewed", with a button that jumps to that week. Hidden on the Week tab when already viewing that week.
 - Settings → Weekly review reminder: pick a day + time and generate a repeating `.ics` (weekly RRULE until the period end, floating local time, VALARM at start, RFC-5545 folding/escaping). Uses `navigator.share({files})` first (iOS share sheet → Calendar), falls back to a download.
 
+## Scoring readability
+
+- **Headline** on Week: "This week: 78% · 5/7 logged" — score and data completeness in one line.
+- **What dragged it down:** names the goal(s) costing you the most points ("Gym cost you 5 points (0/3)"), computed as how much the overall would rise if that goal were at 100%.
+- **At risk:** flags a weekly goal that can no longer reach its target even with a perfect rest of the week (e.g. gym 0/3 with 1 day left), shown on both Today and Week while there's still time to act.
+
 ## Progress & safety (Tier 2)
 
 - **13-week status strip** — a dot per week on Progress: reviewed / fully entered / partial / empty / upcoming. Tap any dot to open that week.

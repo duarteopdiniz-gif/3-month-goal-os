@@ -243,6 +243,61 @@ function overallWeekly(goals, entries, week, today, th, FREQ_WEIGHT, CATEGORIES)
   return { score, status: score==null?"none":statusOf(score,th), cats:scored, allCats:all };
 }
 
+/* ----------------------- scoring readability (#4) ------------------------ */
+/* Point cost of each scored weekly goal to the OVERALL week score, measured as
+ * how many points the overall would rise if that one goal were at 100%.
+ * Returns the overall score + a list sorted by biggest cost (descending). */
+function scoreBreakdown(goals, entries, week, today, th, FREQ_WEIGHT, CATEGORIES){
+  const base = overallWeekly(goals, entries, week, today, th, FREQ_WEIGHT, CATEGORIES);
+  if(base.score==null) return { score:null, items:[] };
+  const items=[];
+  // recompute per-category weighted score with one goal forced to 100, then re-mean categories.
+  for(const c of base.cats){
+    for(const row of c.rows){
+      if(row.score==null || row.score>=100) continue;
+      // category score if THIS goal were 100
+      let wsum=0, acc=0;
+      for(const r of c.rows){ if(r.score==null) continue; const s = r.goal.id===row.goal.id? 100 : r.score; wsum+=r.weight; acc+=s*r.weight; }
+      const catIf100 = wsum? acc/wsum : c.score;
+      // overall if this category used catIf100
+      const others = base.cats.filter(x=>x.cat.id!==c.cat.id).map(x=>x.score);
+      const overallIf100 = (others.reduce((s,v)=>s+v,0)+catIf100)/(others.length+1);
+      const cost = overallIf100 - base.score;    // points the overall loses to this goal
+      if(cost>=0.5) items.push({ goal:row.goal, score:row.score, label:row.label, cost });
+    }
+  }
+  items.sort((a,b)=>b.cost-a.cost);
+  return { score:base.score, items };
+}
+
+/* "At risk": weekly goals that can no longer reach target even with a perfect
+ * remainder of the week. Only meaningful mid-week (days remain). Returns a list
+ * with a short reason. */
+function atRiskGoals(goals, entries, week, today, th){
+  const out=[];
+  const allDays=daysInWeek(week);
+  const remainingDays = allDays.filter(d=> d>today).length;   // days not yet happened
+  for(const g of goals.filter(x=>x.active!==false && (x.freq==="D"||x.freq==="W"))){
+    g._th=th; const r=weeklyResult(g, entries, week, today);
+    if(g.type==="count"){
+      const actual=r.actual||0; const maxPossible=actual+remainingDays; // ≤1 session/day assumption
+      if(maxPossible < g.target && remainingDays>=0 && actual<g.target && (remainingDays>0 || today<week.end===false))
+        out.push({ goal:g, reason:`${actual}/${g.target} with ${remainingDays} day${remainingDays===1?"":"s"} left — can't reach ${g.target}` });
+    } else if(g.type==="boolean" && g.freq==="D"){
+      // daily habit scored on done/covered days; "at risk" if even perfect remaining
+      // days can't lift it to the yellow threshold. done so far:
+      const es=entriesFor(g,entries,week.start,week.end);
+      const done=es.filter(e=>e.kind==="logged"&&(e.value==null||Number(e.value)>0)).length;
+      const elapsed=allDays.filter(d=>d<=today).length;
+      const covered=es.filter(e=>e.kind==="logged"||e.kind==="na").length;
+      const maxDone=done+remainingDays, maxCovered=covered+remainingDays;
+      const bestPct = maxCovered? (maxDone/Math.max(maxCovered,1))*100 : 100;
+      if(elapsed>0 && bestPct < th.yellow) out.push({ goal:g, reason:`even a perfect rest of the week stays under ${th.yellow}%` });
+    }
+  }
+  return out;
+}
+
 /* A goal is "per-day" (expects an entry on each day) vs "weekly single-shot"
  * (one value/decision for the whole week). Daily booleans, screen-time
  * averages, and meals are per-day. Count goals (gym 3/wk), weekly booleans
@@ -388,6 +443,7 @@ const Engine = {
   monthsInPeriod, monthKeyOf, monthRange,
   statusOf, entriesFor, weeklyResult, periodResult, result, byDay,
   categoryWeekly, overallWeekly, weekCoverage, missingCells,
+  scoreBreakdown, atRiskGoals,
   booleanStreak, weeklyTrend, categoryTrend, weekStatuses, insights, fmtMin,
 };
 if (typeof module !== "undefined") module.exports = Engine;
