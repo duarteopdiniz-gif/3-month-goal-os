@@ -42,11 +42,18 @@ function migrate(s){
       }
     }
   }
-  delete s.logs; s._v=2; s.reviews=s.reviews||[]; s.settings=s.settings||{};
+  delete s.logs; s._v=2;
+  // defensive shape (tolerate malformed/partial backups)
+  s.entries = Array.isArray(s.entries)? s.entries : [];
+  s.reviews = Array.isArray(s.reviews)? s.reviews : [];
+  s.goals   = Array.isArray(s.goals)? s.goals : [];
+  s.categories = (Array.isArray(s.categories)&&s.categories.length)? s.categories : structuredClone(CATEGORIES);
+  s.period  = s.period || structuredClone(DEFAULT_PERIOD);
+  s.settings = s.settings || {};
   return s;
 }
 function mkEntry(goalId,date,extra){ return { id:"e"+Date.now().toString(36)+Math.random().toString(36).slice(2,7), goalId, date, kind:"logged", ts:Date.now(), ...extra }; }
-function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+function save(){ localStorage.setItem(KEY, JSON.stringify(state)); GH.scheduleSync(); }
 function todayStr(){ return E.fmt(new Date()); }
 function goalById(id){ return state.goals.find(g=>g.id===id); }
 function catById(id){ return state.categories.find(c=>c.id===id); }
@@ -64,6 +71,110 @@ function currentWeek(){
   return E.buildWeeks(state.period).find(w=>w.start===ws) || E.weekForDate(today(),state.period) || E.buildWeeks(state.period)[0];
 }
 function currentMonthKey(){ return viewMonthKey || E.monthKeyOf(today()); }
+
+/* =========================================================================
+ * GH — GitHub backup sync controller (browser side; logic lives in sync.js).
+ * Token is stored under its OWN key, never inside `state` (so it's never
+ * exported or backed up). Config (repo + lastSha) lives in state.settings.sync.
+ * ========================================================================= */
+const TOKEN_KEY = KEY + "-ghtoken";          // goal-os-v1-ghtoken
+const PRERESTORE_KEY = KEY + "-prerestore";  // safety copy when remote replaces local
+const GH = {
+  timer:null,
+  status:"idle",            // idle | syncing | ok | error | conflict | paused
+  lastMsg:"",
+  conflict:null,            // {remoteSha, remoteContent} when a conflict is pending
+  cfg(){ return (state.settings && state.settings.sync) || null; },
+  token(){ return localStorage.getItem(TOKEN_KEY) || ""; },
+  setToken(t){ t? localStorage.setItem(TOKEN_KEY,t) : localStorage.removeItem(TOKEN_KEY); },
+  enabled(){ const c=this.cfg(); return !!(c && c.repo && this.token()); },
+
+  scheduleSync(ms=15000){
+    if(!this.enabled() || this.status==="conflict") return;
+    clearTimeout(this.timer);
+    this.timer=setTimeout(()=>this.syncNow("debounce"), ms);
+  },
+  cancelPending(){ clearTimeout(this.timer); this.timer=null; },
+
+  async syncNow(reason){
+    if(!this.enabled() || this.status==="conflict") return;
+    const c=this.cfg(); const token=this.token();
+    this.status="syncing"; this.refreshHeader();
+    const snapshot = window.Sync.buildSnapshot(state);
+    let r;
+    try{ r = await window.Sync.push(window.fetch.bind(window), c.repo, token, snapshot, c.lastSha ?? null); }
+    catch(e){ this.status="error"; this.lastMsg="Unexpected sync error."; this.refreshHeader(); return; }
+
+    if(r.status==="ok" || r.status==="skipped"){
+      c.lastSha = r.sha; save_noSync(); this.status="ok"; this.lastMsg="Synced "+new Date().toLocaleTimeString();
+    } else if(r.status==="conflict"){
+      this.status="conflict"; this.conflict={ remoteSha:r.remoteSha, remoteContent:r.remoteContent };
+      this.lastMsg="Backup conflict — resolve in Settings."; this.cancelPending();
+    } else { // error
+      if(r.error && r.error.retryable){ this.status="idle"; this.lastMsg=""; /* silent: retry on next trigger */ }
+      else { this.status="error"; this.lastMsg=r.error? r.error.message : "Sync error."; }
+    }
+    this.refreshHeader();
+  },
+
+  /* resolve a conflict: 'remote' = take GitHub's data (keep a prerestore copy),
+   * 'local' = keep this device's data and overwrite remote. */
+  async resolve(choice){
+    if(!this.conflict) return;
+    const c=this.cfg(); const remoteSha=this.conflict.remoteSha;
+    if(choice==="remote"){
+      try{ localStorage.setItem(PRERESTORE_KEY, localStorage.getItem(KEY)||""); }catch(e){}  // safety copy
+      let incoming;
+      try{ incoming = JSON.parse(this.conflict.remoteContent); }
+      catch(e){ this.lastMsg="Could not parse remote backup."; this.status="error"; this.refreshHeader(); return; }
+      state = migrate(incoming);
+      state.goals = Array.isArray(state.goals)? state.goals : [];
+      state.entries = Array.isArray(state.entries)? state.entries : [];
+      state.reviews = Array.isArray(state.reviews)? state.reviews : [];
+      state.categories = (Array.isArray(state.categories)&&state.categories.length)? state.categories : structuredClone(CATEGORIES);
+      state.period = state.period || structuredClone(DEFAULT_PERIOD);
+      state.goals.forEach(g=>g._th=TH);
+      state.settings = state.settings || {}; state.settings.sync = { repo:c.repo, lastSha:remoteSha };
+      save_noSync();
+      this.conflict=null; this.status="ok"; this.lastMsg="Restored from GitHub.";
+      this.cancelPending();                 // we now match remote; nothing to push
+      this.refreshHeader(); render();
+    } else {                                // keep local → overwrite remote using its current sha as base
+      const token=this.token(); const snapshot=window.Sync.buildSnapshot(state);
+      c.lastSha = remoteSha;                // adopt remote sha so the push is an accepted update
+      this.conflict=null; this.status="syncing"; save_noSync(); this.refreshHeader();
+      let r; try{ r=await window.Sync.push(window.fetch.bind(window), c.repo, token, snapshot, remoteSha); }
+      catch(e){ r={status:"error",error:{message:"Network error.",retryable:true}}; }
+      if(r.status==="ok"||r.status==="skipped"){ c.lastSha=r.sha; save_noSync(); this.status="ok"; this.lastMsg="Overwrote GitHub with this device's data."; }
+      else if(r.status==="conflict"){ this.status="conflict"; this.conflict={remoteSha:r.remoteSha,remoteContent:r.remoteContent}; this.lastMsg="Still conflicting — resolve again."; }
+      else { this.status="error"; this.lastMsg=r.error? r.error.message:"Sync error."; }
+      this.refreshHeader(); render();
+    }
+  },
+
+  async validateAndEnable(repo, token){
+    const r = await window.Sync.checkRepoPrivate(window.fetch.bind(window), repo, token);
+    if(!r.ok) return r;
+    this.setToken(token);
+    state.settings=state.settings||{}; state.settings.sync={ repo, lastSha:null };
+    save_noSync();
+    await this.syncNow("enable");  // may surface a conflict if the repo already has a backup
+    return { ok:true, status:this.status };
+  },
+
+  disable(){ this.setToken(""); if(state.settings) delete state.settings.sync; this.cancelPending(); this.status="idle"; this.conflict=null; save_noSync(); this.refreshHeader(); },
+
+  /* update ONLY the header warning area — never full render (would wipe
+   * text the user is typing in a reflection field). */
+  refreshHeader(){
+    const el=document.getElementById("sync-flag"); if(!el) return;
+    if(this.status==="conflict"){ el.className="syncflag warn"; el.textContent="⚠ Backup issue — resolve in Settings"; el.style.display=""; }
+    else if(this.status==="error"){ el.className="syncflag err"; el.textContent="⚠ Backup error"; el.style.display=""; }
+    else { el.style.display="none"; el.textContent=""; }
+  },
+};
+/* save without triggering a sync (used by GH itself to persist lastSha etc.) */
+function save_noSync(){ localStorage.setItem(KEY, JSON.stringify(state)); }
 
 /* ------------------------- entry operations ------------------------- */
 /* Count goals: each entry = one occurrence (supports multiple/day). */
@@ -108,8 +219,8 @@ function isWeekReviewed(week){ const r=weekReview(week.start); return !!(r && r.
 /* =========================================================================
  * ROUTING — 4 sections
  * ========================================================================= */
-let route="week";
-const TABS=[ {id:"week",label:"Week"},{id:"month",label:"Month"},{id:"progress",label:"Progress"},{id:"goals",label:"Goals"} ];
+let route="today";
+const TABS=[ {id:"today",label:"Today"},{id:"week",label:"Week"},{id:"month",label:"Month"},{id:"progress",label:"Progress"},{id:"goals",label:"Goals"} ];
 function go(r){ route=r; render(); window.scrollTo(0,0); }
 
 function render(){
@@ -117,11 +228,129 @@ function render(){
   const inP = d>=state.period.start && d<=state.period.end;
   document.getElementById("top").innerHTML=`
     <div><h1>Goal Review</h1><div class="meta">${inP?`Week ${wk?wk.index:"—"} of ${E.buildWeeks(state.period).length}`:"Outside period"} · ${longDate(d)}</div></div>
-    <button class="linkbtn" id="settings">Settings</button>`;
-  const views={ week:viewWeek, month:viewMonth, progress:viewProgress, goals:viewGoals };
-  document.getElementById("app").innerHTML=(views[route]||viewWeek)();
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="sync-flag" class="syncflag" style="display:none"></span>
+      <button class="linkbtn" id="settings">Settings</button></div>`;
+  const views={ today:viewToday, week:viewWeek, month:viewMonth, progress:viewProgress, goals:viewGoals };
+  document.getElementById("app").innerHTML=(views[route]||viewToday)();
   document.getElementById("tabs").innerHTML=TABS.map(t=>`<button data-tab="${t.id}" class="${route===t.id?"active":""}">${t.label}</button>`).join("");
   bind();
+  GH.refreshHeader();
+}
+
+/* =========================================================================
+ * TODAY — fast daily logging. Only today's goals, big tap targets.
+ * Writes the SAME entries as the Week grid (single source of truth).
+ * ========================================================================= */
+function viewToday(){
+  const d=today(); const wk=E.weekForDate(d,state.period);
+  if(!wk) return `<div class="empty">Today is outside your 3-month period.</div>`;
+  const asOf=d;
+  // daily habit coverage counter for today
+  const dailyGoals=state.goals.filter(g=>g.active!==false && g.freq==="D");
+  const loggedToday=dailyGoals.filter(g=>{ const e=singleEntry(g.id,d); return e && (e.kind==="logged"||e.kind==="na") || state.entries.some(x=>x.goalId===g.id&&x.date===d); }).length;
+
+  let h=`<div class="summary"><div><div class="lead">Today</div><div class="sub">${longDate(d)} · Week ${wk.index}</div></div>
+    <div style="text-align:right"><div class="coverage" id="today-counter">${loggedToday}/${dailyGoals.length} daily habits logged</div></div></div>`;
+
+  h+=reminderBanner("today");
+
+  // --- Daily ---
+  if(dailyGoals.length){
+    h+=`<h2 class="sec">Daily</h2><div class="rows">`;
+    for(const g of dailyGoals) h+=todayRow(g,d,wk);
+    h+=`</div>`;
+  }
+  // --- This week (weekly goals) ---
+  const weekGoals=state.goals.filter(g=>g.active!==false && g.freq==="W");
+  if(weekGoals.length){
+    h+=`<h2 class="sec">This week</h2><div class="rows">`;
+    for(const g of weekGoals) h+=todayRow(g,d,wk);
+    h+=`</div>`;
+  }
+  // --- This month (monthly COUNT goals only — quick to bump) ---
+  const monthGoals=state.goals.filter(g=>g.active!==false && g.freq==="M" && g.type==="count");
+  if(monthGoals.length){
+    h+=`<h2 class="sec">This month</h2><div class="rows">`;
+    for(const g of monthGoals) h+=todayRow(g,d,wk);
+    h+=`</div>`;
+    h+=`<div class="note">Milestones, GPA, reading etc. live on the Month and Goals tabs.</div>`;
+  }
+  return h;
+}
+
+/* update the "x/y daily habits logged" counter in place (no re-render) */
+function updateTodayCounter(){
+  const el=document.getElementById("today-counter"); if(!el) return;
+  const d=today(); const dailyGoals=state.goals.filter(g=>g.active!==false && g.freq==="D");
+  const logged=dailyGoals.filter(g=> state.entries.some(x=>x.goalId===g.id&&x.date===d)).length;
+  el.textContent=`${logged}/${dailyGoals.length} daily habits logged`;
+}
+
+/* in-app reminder banner (Batch 3). tab = 'today' | 'week'. */
+function reminderBanner(tab){
+  const d=today(); const wk=E.weekForDate(d,state.period); if(!wk) return "";
+  const weeks=E.buildWeeks(state.period); const idx=weeks.findIndex(w=>w.start===wk.start);
+  // 1) previous week unreviewed?
+  if(idx>0){ const prev=weeks[idx-1]; if(!isWeekReviewed(prev)){
+    // on Week tab, hide if already viewing that week
+    if(!(tab==="week" && currentWeek().start===prev.start))
+      return `<div class="reminder"><span>Last week (Week ${prev.index}) hasn't been reviewed.</span><button class="btn sm" id="reminder-jump" data-week="${prev.start}">Review it →</button></div>`;
+  }}
+  // 2) last day of the week & current week unreviewed?
+  if(d===wk.end && !isWeekReviewed(wk)){
+    if(!(tab==="week" && currentWeek().start===wk.start))
+      return `<div class="reminder"><span>It's the last day of the week — time for your review.</span><button class="btn sm" id="reminder-jump" data-week="${wk.start}">Review now →</button></div>`;
+  }
+  return "";
+}
+
+/* one Today row with a big, type-appropriate control */
+function todayRow(g,d,wk){
+  g._th=TH;
+  if(g.type==="count"){
+    const scope = g.freq==="M"? E.monthRange(E.monthKeyOf(d)) : {start:wk.start,end:wk.end};
+    const total=state.entries.filter(e=>e.goalId===g.id&&e.date>=scope.start&&e.date<=scope.end&&e.kind==="logged").length;
+    const r = g.freq==="M"? E.periodResult(g,state.entries,d) : E.weeklyResult(g,state.entries,wk,d);
+    const st=r.score==null?"none":r.status;
+    return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div>
+      <div class="det">${g.freq==="M"?"this month":"this week"}: ${total}/${g.target} ${esc(g.unit||"")} · <span class="st ${st}">${r.score==null?"—":E.round(r.score)+"%"}</span></div></div>
+      <div class="counter big"><button data-tcount="dec:${g.id}">−</button><span class="v" data-tcount-n="${g.id}">${total}</span><button data-tcount="inc:${g.id}">＋</button></div></div>`;
+  }
+  if(g.type==="boolean"){
+    if(g.freq==="D"){
+      const e=singleEntry(g.id,d); const stt=e? (e.kind==="na"?"na":"logged") : "missing";
+      const label = stt==="logged"?"✓ Done" : stt==="na"?"– N/A" : "Mark";
+      return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div><div class="det">today</div></div>
+        <button class="bigtoggle ${stt}" data-tbool="${g.id}">${label}</button></div>`;
+    } else {
+      // weekly boolean: if already done earlier this week, show which day
+      const done=state.entries.find(e=>e.goalId===g.id&&e.date>=wk.start&&e.date<=wk.end&&e.kind==="logged");
+      if(done){ return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div><div class="det">once this week</div></div>
+        <span class="st green">✓ done ${dShort(done.date)}</span></div>`; }
+      return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div><div class="det">once this week</div></div>
+        <button class="bigtoggle missing" data-twkbool="${g.id}">Mark done</button></div>`;
+    }
+  }
+  if(g.type==="meals"){
+    const e=state.entries.find(x=>x.goalId===g.id&&x.date===d&&x.kind!=="na"); const m=(e&&e.meals)||{};
+    const items=[["b","B"],["l","L"],["d","D"],["s","S"]];
+    return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div>
+      <div class="chips" style="margin-top:6px">${items.map(([k,lab])=>`<button class="chip ${m[k]?"on":""}" data-tmeal="${g.id}:${k}">${lab}</button>`).join("")}</div></div></div>`;
+  }
+  if(g.type==="average"){
+    const e=state.entries.find(x=>x.goalId===g.id&&x.date===d&&x.kind==="logged");
+    const r=E.weeklyResult(g,state.entries,wk,d); const st=r.score==null?"none":r.status;
+    return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div>
+      <div class="det" data-tavg-det="${g.id}">${e?E.fmtMin(Number(e.value))+" today":"not entered"} · wk ${r.label} <span class="st ${st}">${r.score==null?"":E.round(r.score)+"%"}</span></div></div>
+      <input class="tavg" type="number" inputmode="numeric" placeholder="min" value="${e?e.value:""}" data-tavg="${g.id}" style="width:92px"></div>`;
+  }
+  if(g.type==="percentage"){
+    const r=E.weeklyResult(g,state.entries,wk,d); const st=r.score==null?"none":r.status;
+    return `<div class="grow todayrow"><div class="nm"><div class="title">${esc(g.title)}</div><div class="det">this week · ${r.label} <span class="st ${st}">${r.score==null?"":E.round(r.score)+"%"}</span></div></div>
+      <button class="btn sec sm" data-tpct="${g.id}">Edit</button></div>`;
+  }
+  return "";
 }
 
 /* =========================================================================
@@ -147,6 +376,7 @@ function viewWeek(){
     <div style="text-align:right">
       <div class="coverage"><b>${cov.pct}%</b> of this week's data entered<br><span class="small">${cov.have}/${cov.need} expected entries</span></div>
     </div></div>`;
+  h+=reminderBanner("week");
   h+=`<div class="jumpbar">
       <button class="btn sec sm" id="wk-prev" ${idx<=0?"disabled":""}>‹ Prev</button>
       <button class="btn sec sm" id="wk-this">This week</button>
@@ -667,6 +897,37 @@ function bind(){
   if(wn) wn.onclick=()=>{ const weeks=E.buildWeeks(state.period); const i=weeks.findIndex(w=>w.start===currentWeek().start); if(i<weeks.length-1){ viewWeekStart=weeks[i+1].start; render(); } };
 
   // count +/-
+  // ---- TODAY tab controls ----
+  document.querySelectorAll("[data-tcount]").forEach(b=>b.onclick=()=>{
+    const [op,gid]=b.dataset.tcount.split(":"); const g=goalById(gid); const d=today(); const wk=E.weekForDate(d,state.period);
+    if(op==="inc") addOccurrence(gid,d);
+    else { // remove latest occurrence in the goal's current scope
+      const scope = g.freq==="M"? E.monthRange(E.monthKeyOf(d)) : {start:wk.start,end:wk.end};
+      const list=state.entries.filter(e=>e.goalId===gid&&e.date>=scope.start&&e.date<=scope.end&&e.kind==="logged").sort((a,b2)=>a.ts-b2.ts);
+      if(list.length){ state.entries=state.entries.filter(e=>e.id!==list[list.length-1].id); save(); }
+    }
+    render();
+  });
+  document.querySelectorAll("[data-tbool]").forEach(b=>b.onclick=()=>{ const gid=b.dataset.tbool; const d=today(); const cur=singleEntry(gid,d);
+    const next=!cur?"logged":cur.kind==="logged"?"na":"missing"; setDayState(gid,d,next); render(); });
+  document.querySelectorAll("[data-twkbool]").forEach(b=>b.onclick=()=>{ addOccurrence(b.dataset.twkbool, today()); render(); });
+  document.querySelectorAll("[data-tmeal]").forEach(b=>b.onclick=()=>{ const [gid,k]=b.dataset.tmeal.split(":"); const d=today();
+    // remove any N/A entry for the day before toggling meals
+    const na=state.entries.find(x=>x.goalId===gid&&x.date===d&&x.kind==="na"); if(na) state.entries=state.entries.filter(x=>x!==na);
+    let e=state.entries.find(x=>x.goalId===gid&&x.date===d&&x.kind!=="na"); if(!e){ e=mkEntry(gid,d,{meals:{}}); state.entries.push(e); }
+    e.kind="logged"; e.meals=e.meals||{}; e.meals[k]=!e.meals[k]; save(); render(); });
+  // average: save on change WITHOUT a full re-render (re-render swallows the next tap)
+  document.querySelectorAll("[data-tavg]").forEach(inp=>inp.onchange=()=>{ const gid=inp.dataset.tavg; const d=today(); const v=inp.value.trim();
+    if(v==="") clearValue(gid,d); else setValue(gid,d,{value:Number(v)});
+    const g=goalById(gid); const wk=E.weekForDate(d,state.period); const r=E.weeklyResult(g,state.entries,wk,d);
+    const det=document.querySelector(`[data-tavg-det="${gid}"]`); if(det){ const st=r.score==null?"none":r.status;
+      det.innerHTML=`${v!==""?E.fmtMin(Number(v))+" today":"not entered"} · wk ${r.label} <span class="st ${st}">${r.score==null?"":E.round(r.score)+"%"}</span>`; }
+    updateTodayCounter();
+  });
+  document.querySelectorAll("[data-tpct]").forEach(b=>b.onclick=()=>editPct(b.dataset.tpct));
+  // reminder banner jump
+  const rb=document.getElementById("reminder-jump"); if(rb) rb.onclick=()=>{ viewWeekStart=rb.dataset.week; go("week"); };
+
   // grid cells (weekly check-in)
   document.querySelectorAll("[data-cell]").forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); onCellClick(el.dataset.cell, el); });
   const fg=document.getElementById("fill-gaps"); if(fg) fg.onclick=fillGaps;
@@ -707,7 +968,7 @@ function saveWeek(markReviewed){
   const snap={ type:"weekly", key:wk.start, weekIndex:wk.index, score:o.score, coverage:cov,
     answers, completed: markReviewed? true : (rec?rec.completed:false), updatedAt:todayStr() };
   if(rec) Object.assign(rec,snap); else state.reviews.push(snap);
-  save(); flash(markReviewed?"Week reviewed ✓":"Reflection saved"); render();
+  save(); if(markReviewed) GH.syncNow("weekly-review"); flash(markReviewed?"Week reviewed ✓":"Reflection saved"); render();
 }
 function saveMonth(key){
   const d=today(); const weeks=E.buildWeeks(state.period).filter(w=>E.monthKeyOf(w.start)===key && E.parseDate(w.start)<=E.parseDate(d));
@@ -717,9 +978,9 @@ function saveMonth(key){
   let rec=monthReview(key);
   const snap={ type:"monthly", key, score:n?sum/n:null, answers, completed:true, updatedAt:todayStr() };
   if(rec) Object.assign(rec,snap); else state.reviews.push(snap);
-  save(); flash("Monthly review saved ✓");
-  // data safety: offer a backup download after a monthly review
-  offerBackup("You just completed a monthly review. Download a backup of your data?");
+  save(); GH.syncNow("monthly-review"); flash("Monthly review saved ✓");
+  // data safety: offer a backup download after a monthly review (only if GitHub sync is NOT set up)
+  if(!GH.enabled()) offerBackup("You just completed a monthly review. Download a backup of your data?");
   render();
 }
 
@@ -729,6 +990,18 @@ function doExport(){
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download=`goal-backup-${todayStr()}.json`; a.click(); URL.revokeObjectURL(a.href);
   state.settings=state.settings||{}; state.settings.lastBackup=todayStr(); save();
+}
+/* repeating weekly-review reminder as .ics — share sheet (iOS) or download */
+async function exportReminderICS(dayOfWeek, time){
+  const appUrl = location.origin + location.pathname + "?tab=week";
+  const ics = window.Sync.buildICS({ startISO: todayStr(), untilISO: state.period.end, dayOfWeek, time, appUrl });
+  const file = new File([ics], "goal-review-reminder.ics", { type:"text/calendar" });
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({ files:[file], title:"Goal review reminder" }); flash("Shared to Calendar"); return; }catch(e){ /* fall through to download */ }
+  }
+  const blob=new Blob([ics],{type:"text/calendar"}); const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="goal-review-reminder.ics"; a.click(); URL.revokeObjectURL(a.href);
+  flash("Calendar file downloaded");
 }
 function offerBackup(msg){
   const bg=sheet(`<h3>Back up your data</h3><div class="small" style="margin:6px 0 12px">${esc(msg)} Your data lives only on this device, so a backup protects you if the browser storage is cleared.</div>
@@ -816,7 +1089,34 @@ function collect(bg,g){
  * SETTINGS — period, backtracking date, example data, export/import
  * ========================================================================= */
 function openSettings(){
+  const persist = (state.settings&&state.settings.persist)||"unknown";
+  const persistTxt = { granted:"Granted — the browser is less likely to evict your data.", denied:"Denied — the browser may evict data under storage pressure.", unsupported:"Not supported by this browser.", unknown:"Not checked yet." }[persist];
+  const cfg=GH.cfg(); const syncOn=GH.enabled();
+  const rem=(state.settings&&state.settings.reminder)||{day:"0",time:"18:00"};
   const bg=sheet(`<h3>Settings</h3>
+    <h2 class="sec">Data safety</h2>
+    <div class="kv"><span>Persistent storage</span><b>${persist}</b></div>
+    <div class="note">${persistTxt} This lowers eviction risk but is <b>not</b> a backup.</div>
+
+    <h2 class="sec">GitHub backup sync</h2>
+    ${GH.status==="conflict"? `<div class="reminder" style="border-left-color:var(--warn)"><span><b>Backup conflict.</b> The GitHub backup differs from this device.</span></div>
+      <div class="rowbtn"><button class="btn sm" id="s-use-remote">Use GitHub's data</button><button class="btn sec sm" id="s-use-local">Use this device's data</button></div>
+      <div class="note">"Use GitHub's data" keeps a safety copy of your current local data first.</div>`:""}
+    <label class="fld">Private repo (owner/name)</label><input id="s-repo" value="${esc(cfg?cfg.repo:"")}" placeholder="yourname/goal-backup">
+    <label class="fld">Fine-grained token (Contents: read & write, that repo only)</label><input id="s-token" type="password" value="${GH.token()?"":""}" placeholder="${GH.token()?"•••••• (saved)":"github_pat_…"}">
+    <div class="rowbtn" style="margin-top:10px">
+      <button class="btn sm" id="s-sync-enable">${syncOn?"Update / reconnect":"Connect & back up"}</button>
+      ${syncOn?`<button class="btn sec sm" id="s-sync-now">Sync now</button><button class="btn ghost sm" id="s-sync-off">Disconnect</button>`:""}
+    </div>
+    <div class="small" id="s-sync-status" style="margin-top:6px">${syncOn? (GH.lastMsg||"Connected to "+cfg.repo) : "Not connected. Data stays only on this device."}</div>
+    <div class="note">The token is stored only on this device and is never included in exports or the backup file. Use a <b>private</b> repo — public repos are refused.</div>
+
+    <h2 class="sec">Weekly review reminder</h2>
+    <div class="grid2"><div><label class="fld">Day</label><select id="s-rem-day">${["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((n,i)=>`<option value="${i}" ${String(i)===String(rem.day)?"selected":""}>${n}</option>`).join("")}</select></div>
+      <div><label class="fld">Time</label><input id="s-rem-time" type="time" value="${rem.time}"></div></div>
+    <button class="btn sec sm" id="s-ics" style="margin-top:8px">Add to calendar (.ics)</button>
+    <div class="note">A closed app can't notify you without a server. This adds a repeating calendar event with an alert until ${state.period.end}.</div>
+
     <h2 class="sec">Period</h2>
     <div class="grid2"><div><label class="fld">Start</label><input id="s-start" type="date" value="${state.period.start}"></div><div><label class="fld">End</label><input id="s-end" type="date" value="${state.period.end}"></div></div>
     <h2 class="sec">Backtracking</h2>
@@ -826,17 +1126,37 @@ function openSettings(){
     <button class="btn sec" id="s-example">Load realistic example data</button>
     <button class="btn ghost" id="s-clear" style="margin-top:8px">Clear all entries (keep goals)</button>
     <button class="btn sec" id="s-export" style="margin-top:8px">Export backup (JSON)</button>
-    <div class="small" style="margin-top:6px">${state.settings&&state.settings.lastBackup?`Last backup: ${state.settings.lastBackup}`:"No backup yet — your data lives only on this device."}</div>
+    <div class="small" style="margin-top:6px">${state.settings&&state.settings.lastBackup?`Last backup: ${state.settings.lastBackup}`:"No file backup yet."}</div>
     <label class="fld">Import JSON</label><input id="s-import" type="file" accept="application/json">
     <button class="btn danger" id="s-reset" style="margin-top:14px">Reset to 25 seed goals</button>
-    <div style="height:12px"></div><button class="btn" id="s-save">Save</button>`);
+    <div style="height:12px"></div><button class="btn" id="s-save">Save period & backtracking</button>`);
+
   bg.querySelector("#s-save").onclick=()=>{ state.period.start=bg.querySelector("#s-start").value; state.period.end=bg.querySelector("#s-end").value;
     setVToday(bg.querySelector("#s-vtoday").value||null); viewWeekStart=null; viewMonthKey=null; save(); bg.remove(); flash("Saved"); render(); };
   bg.querySelector("#s-example").onclick=()=>{ loadExample(); bg.remove(); flash("Example data loaded"); render(); };
-  bg.querySelector("#s-clear").onclick=()=>{ if(confirm("Delete all entries?")){ state.entries=[]; state.reviews=[]; save(); bg.remove(); flash("Cleared"); render(); } };
+  bg.querySelector("#s-clear").onclick=()=>{ if(confirm("Delete all entries? A safety copy is kept (Reset to undo not available).")){ try{localStorage.setItem(PRERESTORE_KEY,localStorage.getItem(KEY)||"");}catch(e){} state.entries=[]; state.reviews=[]; save(); bg.remove(); flash("Cleared (safety copy kept)"); render(); } };
   bg.querySelector("#s-export").onclick=()=>{ doExport(); flash("Exported"); };
   bg.querySelector("#s-import").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ state=migrate(JSON.parse(r.result)); state.goals.forEach(g=>g._th=TH); save(); bg.remove(); flash("Imported"); render(); }catch(err){ flash("Invalid file"); } }; r.readAsText(f); };
-  bg.querySelector("#s-reset").onclick=()=>{ if(confirm("Reset everything to seed?")){ state=seedState(); setVToday(null); save(); bg.remove(); flash("Reset"); render(); } };
+  bg.querySelector("#s-reset").onclick=()=>{ if(confirm("Reset everything to seed?")){ try{localStorage.setItem(PRERESTORE_KEY,localStorage.getItem(KEY)||"");}catch(e){} state=seedState(); setVToday(null); save(); bg.remove(); flash("Reset (safety copy kept)"); render(); } };
+
+  // sync wiring
+  const se=bg.querySelector("#s-sync-enable"); if(se) se.onclick=async()=>{
+    const repo=bg.querySelector("#s-repo").value.trim(); let token=bg.querySelector("#s-token").value.trim();
+    if(!token && GH.token()) token=GH.token();  // keep existing token if field left blank
+    if(!repo || !token){ flash("Enter repo and token"); return; }
+    if(!/^[\w.-]+\/[\w.-]+$/.test(repo)){ flash("Repo must be owner/name"); return; }
+    const st=bg.querySelector("#s-sync-status"); st.textContent="Checking repo…";
+    const r=await GH.validateAndEnable(repo, token);
+    if(!r.ok){ st.textContent="✗ "+r.message; return; }
+    st.textContent = GH.status==="conflict"? "Connected, but a backup already exists — resolve the conflict." : "✓ "+(GH.lastMsg||"Connected & backed up.");
+    bg.remove(); openSettings();  // re-open to reflect new state (conflict buttons etc.)
+  };
+  const sn=bg.querySelector("#s-sync-now"); if(sn) sn.onclick=async()=>{ bg.querySelector("#s-sync-status").textContent="Syncing…"; await GH.syncNow("manual"); bg.querySelector("#s-sync-status").textContent=GH.lastMsg||"Done."; };
+  const so=bg.querySelector("#s-sync-off"); if(so) so.onclick=()=>{ if(confirm("Disconnect GitHub sync? The token is removed from this device.")){ GH.disable(); bg.remove(); openSettings(); } };
+  const ur=bg.querySelector("#s-use-remote"); if(ur) ur.onclick=async()=>{ await GH.resolve("remote"); bg.remove(); flash("Restored from GitHub"); };
+  const ul=bg.querySelector("#s-use-local"); if(ul) ul.onclick=async()=>{ await GH.resolve("local"); bg.remove(); flash("Kept this device's data"); };
+  const ics=bg.querySelector("#s-ics"); if(ics) ics.onclick=()=>{ const day=bg.querySelector("#s-rem-day").value, time=bg.querySelector("#s-rem-time").value;
+    state.settings=state.settings||{}; state.settings.reminder={day,time}; save_noSync(); exportReminderICS(Number(day), time); };
 }
 
 /* =========================================================================
@@ -895,10 +1215,33 @@ function loadExample(){
 /* =========================================================================
  * BOOT
  * ========================================================================= */
-function boot(){ // default to viewing the week that contains "today"
-  const wk=E.weekForDate(today(),state.period); if(wk) viewWeekStart=wk.start;
+async function requestPersistence(){
+  if(navigator.storage && navigator.storage.persist){
+    try{
+      let persisted = await navigator.storage.persisted?.();
+      if(!persisted) persisted = await navigator.storage.persist();
+      state.settings=state.settings||{}; state.settings.persist = persisted? "granted":"denied";
+    }catch(e){ state.settings=state.settings||{}; state.settings.persist="denied"; }
+  } else { state.settings=state.settings||{}; state.settings.persist="unsupported"; }
+  save_noSync();
+}
+
+function boot(){
+  const d=today(); const wk=E.weekForDate(d,state.period); if(wk) viewWeekStart=wk.start;
+  // routing: ?tab= wins; otherwise Today by default, but Week on the last day of the week (review day)
+  const params=new URLSearchParams(location.search);
+  const tab=params.get("tab");
+  if(tab && ["today","week","month","progress","goals"].includes(tab)) route=tab;
+  else route = (wk && d===wk.end) ? "week" : "today";
+
   render();
   if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  requestPersistence();
   setTimeout(maybeBackupReminder, 800);
+
+  // sync triggers
+  if(GH.enabled()) setTimeout(()=>GH.syncNow("boot-catchup"), 3000); // catch leftovers shortly after boot
+  document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") GH.syncNow("hidden"); });
+  window.addEventListener("online", ()=>GH.syncNow("online"));
 }
 window.addEventListener("DOMContentLoaded", boot);

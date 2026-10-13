@@ -262,3 +262,23 @@ table.grid .rescol .rp{font-size:.72rem;font-weight:650}
 /* computed insights */
 .insights{margin:14px 0 4px}
 .insight{background:var(--accent-soft);border-radius:8px;padding:9px 12px;font-size:.88rem;margin-bottom:6px;color:var(--ink)}
+
+/* header sync flag */
+.syncflag{font-size:.72rem;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.syncflag.warn{background:var(--warn-bg);color:#7a5600}
+.syncflag.err{background:var(--bad-bg);color:var(--bad)}
+
+/* in-app reminder banner */
+.reminder{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  background:var(--accent-soft);border:1px solid #cfe0fb;border-radius:9px;padding:10px 13px;margin:8px 0;font-size:.88rem}
+
+/* Today tab controls — big tap targets */
+.todayrow{min-height:56px}
+.counter.big button{width:48px;height:48px;font-size:1.4rem}
+.counter.big .v{min-width:40px;font-size:1.1rem}
+.bigtoggle{min-width:110px;min-height:48px;border-radius:10px;border:1px solid var(--line-2);background:var(--panel);
+  color:var(--ink);font-size:.95rem;font-weight:600;cursor:pointer;padding:0 14px}
+.bigtoggle.logged{background:var(--ok-bg);border-color:#bfe0cd;color:var(--ok)}
+.bigtoggle.na{background:var(--miss-bg);border-color:var(--line-2);color:var(--miss)}
+.bigtoggle.missing{background:var(--accent);border-color:var(--accent);color:#fff}
+.tavg{height:48px;text-align:center;font-size:1rem}

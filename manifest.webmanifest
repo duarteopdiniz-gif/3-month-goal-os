@@ -1,8 +1,8 @@
 {
   "name": "Goal Review",
   "short_name": "Goal Review",
-  "description": "Reviews-first 3-month goal tracker: weekly & monthly check-ins, coverage-aware progress, clean charts.",
-  "start_url": "./index.html",
+  "description": "Reviews-first 3-month goal tracker: fast daily logging, weekly & monthly check-ins, coverage-aware progress, GitHub backup.",
+  "start_url": "./index.html?tab=today",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
@@ -11,5 +11,9 @@
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Log today", "short_name": "Today", "url": "./index.html?tab=today" },
+    { "name": "Weekly review", "short_name": "Review", "url": "./index.html?tab=week" }
   ]
 }

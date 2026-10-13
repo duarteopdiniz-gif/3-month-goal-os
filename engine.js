@@ -82,7 +82,7 @@ function entriesFor(goal, entries, start, end){
  * score === null means "no data yet" (excluded from rollups).
  * ========================================================================= */
 function weeklyResult(goal, entries, week, today){
-  const th = goal._th || DEFAULT_TH;
+  const th = (goal && goal._th) || DEFAULT_TH;
   const weekDays = daysInWeek(week);
   const elapsedDays = weekDays.filter(d=> d<=today);           // only days that have happened
   const es = entriesFor(goal, entries, week.start, week.end);
@@ -171,7 +171,7 @@ function byDay(es, weekDays){
  * each achievement once.
  * ========================================================================= */
 function periodResult(goal, entries, asOfDate){
-  const th = goal._th || DEFAULT_TH;
+  const th = (goal && goal._th) || DEFAULT_TH;
   switch(goal.type){
     case "threshold": {
       const cur=Number(goal.current)||0;
