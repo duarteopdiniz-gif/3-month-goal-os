@@ -282,3 +282,9 @@ table.grid .rescol .rp{font-size:.72rem;font-weight:650}
 .bigtoggle.na{background:var(--miss-bg);border-color:var(--line-2);color:var(--miss)}
 .bigtoggle.missing{background:var(--accent);border-color:var(--accent);color:#fff}
 .tavg{height:48px;text-align:center;font-size:1rem}
+
+/* scoring readability (#4) */
+.headline{font-size:.95rem;margin:6px 0 2px}
+.headline b{font-weight:700}
+.drag{font-size:.85rem;color:var(--ink-2);margin:2px 0}
+.atrisk{font-size:.85rem;background:var(--warn-bg);border:1px solid #ecd9a6;color:#7a5600;border-radius:8px;padding:8px 11px;margin:8px 0}
