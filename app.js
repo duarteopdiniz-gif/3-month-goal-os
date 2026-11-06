@@ -293,7 +293,7 @@ function updateTodayCounter(){
 /* scoring readability (#4): headline line, what dragged it down, at-risk flags */
 function scoreHeadline(wk, asOf, o, cov){
   if(o.score==null) return `<div class="headline">No data entered for this week yet — log something to see your score.</div>`;
-  let h=`<div class="headline"><b>This week: ${E.round(o.score)}%</b> · ${cov.have}/${cov.need} logged</div>`;
+  let h=`<div class="headline"><b>This week: ${E.round(o.score)}%</b></div>`;
   // biggest drag(s)
   const bd=E.scoreBreakdown(state.goals,state.entries,wk,asOf,TH,FW,state.categories);
   if(bd.items.length){
@@ -302,30 +302,51 @@ function scoreHeadline(wk, asOf, o, cov){
     if(bd.items[1] && E.round(bd.items[1].cost)>=1) h+=` Next: ${esc(bd.items[1].goal.title)} (−${E.round(bd.items[1].cost)}).`;
     h+=`</div>`;
   }
-  // at-risk (mid-week only)
-  const risk=E.atRiskGoals(state.goals,state.entries,wk,asOf,TH);
-  if(risk.length){
-    h+=`<div class="atrisk">⚠ At risk: ${risk.map(r=>`${esc(r.goal.title)} — ${esc(r.reason)}`).join("; ")}</div>`;
-  }
   return h;
 }
 
-/* in-app reminder banner (Batch 3). tab = 'today' | 'week'. */
-function reminderBanner(tab){
-  const d=today(); const wk=E.weekForDate(d,state.period); if(!wk) return "";
-  const weeks=E.buildWeeks(state.period); const idx=weeks.findIndex(w=>w.start===wk.start);
-  // 1) previous week unreviewed?
-  if(idx>0){ const prev=weeks[idx-1]; if(!isWeekReviewed(prev)){
-    // on Week tab, hide if already viewing that week
-    if(!(tab==="week" && currentWeek().start===prev.start))
-      return `<div class="reminder"><span>Last week (Week ${prev.index}) hasn't been reviewed.</span><button class="btn sm" id="reminder-jump" data-week="${prev.start}">Review it →</button></div>`;
-  }}
-  // 2) last day of the week & current week unreviewed?
-  if(d===wk.end && !isWeekReviewed(wk)){
-    if(!(tab==="week" && currentWeek().start===wk.start))
-      return `<div class="reminder"><span>It's the last day of the week — time for your review.</span><button class="btn sm" id="reminder-jump" data-week="${wk.start}">Review now →</button></div>`;
+/* Week tab: ONE banner, picked by urgency (unreviewed week → at risk → blank
+ * cells). Anything else that needs attention collapses into a one-line "Also". */
+function weekNotices(wk, asOf){
+  const items=[];
+  const rem=reminderInfo("week");
+  if(rem) items.push({ banner:`<div class="reminder"><span>${rem.text}</span><button class="btn sm" id="reminder-jump" data-week="${rem.week}">${rem.label}</button></div>`,
+                       also:`<button class="linkbtn" id="reminder-jump" data-week="${rem.week}">${rem.short}</button>` });
+  const risk=E.atRiskGoals(state.goals,state.entries,wk,asOf,TH);
+  if(risk.length){
+    const list=risk.map(r=>`<li>${esc(r.goal.title)} — ${esc(r.reason)}</li>`).join("");
+    items.push({ banner:`<details class="atrisk"><summary>⚠ ${risk.length} goal${risk.length===1?"":"s"} can't hit target this week</summary><ul>${list}</ul></details>`,
+                 also:`<details class="alsorisk"><summary>${risk.length} at risk</summary><ul>${list}</ul></details>` });
   }
-  return "";
+  const missing=E.missingCells(state.goals,state.entries,wk,asOf);
+  if(missing.length){
+    const n=`${missing.length} ${missing.length===1?"cell is":"cells are"} still blank`;
+    items.push({ banner:`<div class="gapbar" id="gapbar"><span>${n} for this week.</span><button class="btn sm" id="fill-gaps">Fill the gaps →</button></div>`,
+                 also:`<button class="linkbtn" id="fill-gaps">${missing.length} blank cell${missing.length===1?"":"s"}</button>` });
+  }
+  if(!items.length) return `<div class="gapbar done">✓ Every day up to now has an entry.</div>`;
+  let h=items[0].banner;
+  if(items.length>1) h+=`<div class="also">Also: ${items.slice(1).map(i=>i.also).join(" · ")}</div>`;
+  return h;
+}
+
+/* in-app reminder (Batch 3). tab = 'today' | 'week'. Returns {text,label,short,week} or null. */
+function reminderInfo(tab){
+  const d=today(); const wk=E.weekForDate(d,state.period); if(!wk) return null;
+  const weeks=E.buildWeeks(state.period); const idx=weeks.findIndex(w=>w.start===wk.start);
+  // 1) previous week unreviewed? (on Week tab, hide if already viewing that week)
+  if(idx>0){ const prev=weeks[idx-1];
+    if(!isWeekReviewed(prev) && !(tab==="week" && currentWeek().start===prev.start))
+      return { text:`Last week (Week ${prev.index}) hasn't been reviewed.`, label:"Review it →", short:`review Week ${prev.index}`, week:prev.start };
+  }
+  // 2) last day of the week & current week unreviewed?
+  if(d===wk.end && !isWeekReviewed(wk) && !(tab==="week" && currentWeek().start===wk.start))
+    return { text:"It's the last day of the week — time for your review.", label:"Review now →", short:"review this week", week:wk.start };
+  return null;
+}
+function reminderBanner(tab){
+  const r=reminderInfo(tab); if(!r) return "";
+  return `<div class="reminder"><span>${r.text}</span><button class="btn sm" id="reminder-jump" data-week="${r.week}">${r.label}</button></div>`;
 }
 
 /* one Today row with a big, type-appropriate control */
@@ -402,22 +423,13 @@ function viewWeek(){
 
   // headline + what dragged it down (#4)
   h+=scoreHeadline(wk, asOf, o, cov);
-  h+=reminderBanner("week");
   h+=`<div class="jumpbar">
       <button class="btn sec sm" id="wk-prev" ${idx<=0?"disabled":""}>‹ Prev</button>
       <button class="btn sec sm" id="wk-this">This week</button>
       <button class="btn sec sm" id="wk-next" ${idx>=weeks.length-1?"disabled":""}>Next ›</button>
       <input type="date" id="wk-jump" value="${wk.start}" min="${state.period.start}" max="${state.period.end}" title="Jump to the week of a date">
     </div>`;
-
-  // ---- "fill the gaps" nudge ----
-  const missing=E.missingCells(state.goals,state.entries,wk,asOf);
-  if(missing.length){
-    h+=`<div class="gapbar" id="gapbar"><span>${missing.length} ${missing.length===1?"cell is":"cells are"} still blank for this week.</span>
-      <button class="btn sm" id="fill-gaps">Fill the gaps →</button></div>`;
-  } else {
-    h+=`<div class="gapbar done">✓ Every day up to now has an entry.</div>`;
-  }
+  h+=weekNotices(wk, asOf);
 
   // ---- the grid, grouped by category ----
   const prevWk = idx>0 ? weeks[idx-1] : null;
@@ -785,6 +797,7 @@ function monthGoalEditor(gid, monthKey){
 /* =========================================================================
  * PROGRESS — the visualisations (kept & improved, but restrained)
  * ========================================================================= */
+let goalTableOpen=false;   // remembers the Progress table's open/closed state across re-renders
 function viewProgress(){
   const d=today();
   const trend=E.weeklyTrend(state.goals,state.entries,state.period,d,TH,FW,state.categories);
@@ -793,7 +806,7 @@ function viewProgress(){
   const st=overall==null?"none":E.statusOf(overall,TH);
 
   let h=`<div class="summary"><div><div class="bignum ${overall==null?"none":""}">${overall==null?"—":E.round(overall)+"%"}</div>
-    <div class="sub">Overall · avg of ${done.length} reviewed week${done.length===1?"":"s"} · ${state.period.start} → ${state.period.end}</div></div></div>`;
+    <div class="sub">Overall · ${done.length?`avg of ${done.length} week${done.length===1?"":"s"} with data`:"no data entered yet"} · ${state.period.start} → ${state.period.end}</div></div></div>`;
 
   // 13-week status strip
   const statuses=E.weekStatuses(state.goals,state.entries,state.reviews,state.period,d);
@@ -822,7 +835,7 @@ function viewProgress(){
   // main trend chart
   h+=`<h2 class="sec">Weekly performance over the 3 months</h2>
     <div class="chartwrap">${lineChart(trend.map(t=>({x:t.week,y:t.score,future:t.future})),"W")}
-    <div class="clegend">Each point is a reviewed week's score. Future weeks are omitted; weeks with no data yet are gaps.</div></div>`;
+    <div class="clegend">Each point is the score of a week with data. Future weeks are omitted; weeks with no data yet are gaps.</div></div>`;
 
   // category comparison (small multiples as a grouped bar)
   h+=`<h2 class="sec">Category performance (period to date)</h2><div class="rows">`;
@@ -836,17 +849,19 @@ function viewProgress(){
   h+=`</div>`;
 
   // strongest / weakest
-  if(catScores.length){
-    const best=[...catScores].sort((a,b)=>b.sc-a.sc)[0], worst=[...catScores].sort((a,b)=>a.sc-b.sc)[0];
+  // only meaningful when there are ≥2 areas AND they actually differ
+  const bestW = catScores.length>=2 ? [...catScores].sort((a,b)=>b.sc-a.sc) : [];
+  if(bestW.length && bestW[0].sc - bestW[bestW.length-1].sc >= 5){
+    const best=bestW[0], worst=bestW[bestW.length-1];
     h+=`<div class="rows" style="margin-top:10px">
       <div class="grow"><div class="nm"><div class="title">Strongest area</div></div><span class="st green">${esc(best.c.name)}</span></div>
-      <div class="grow"><div class="nm"><div class="title">Needs most attention</div></div><span class="st red">${esc(worst.c.name)}</span></div></div>`;
+      <div class="grow"><div class="nm"><div class="title">Needs most attention</div></div><span class="st ${worst.cst}">${esc(worst.c.name)}</span></div></div>`;
   }
 
   // every goal table
-  h+=`<h2 class="sec">Every goal — target vs actual</h2>`;
   const wk=E.weekForDate(d,state.period);
-  h+=`<table class="tbl"><thead><tr><th>Goal</th><th>Target</th><th class="num">Actual</th><th>Status</th></tr></thead><tbody>`;
+  let rowsH="", nGreen=0, nBehind=0, nNone=0;
+  rowsH+=`<table class="tbl"><thead><tr><th>Goal</th><th>Target</th><th class="num">Actual</th><th>Status</th></tr></thead><tbody>`;
   for(const g of state.goals.filter(x=>x.active!==false)){ g._th=TH;
     const r=E.result(g,state.entries,wk,d);
     const tgt= g.type==="threshold"?`${g.direction==="min"?"≥":"≤"}${g.target}`
@@ -856,9 +871,13 @@ function viewProgress(){
       : g.type==="reading"?`${(g.books||[]).length} books`
       : `${g.target} ${g.unit||""}`;
     const stt=r.score==null?"none":r.status;
-    h+=`<tr><td>${esc(g.title)}</td><td>${tgt}</td><td class="num">${esc(r.label)}</td><td><span class="st ${stt}">${r.score==null?"—":E.round(r.score)+"%"}</span></td></tr>`;
+    if(r.score==null || r.hasData===false) nNone++; else if(stt==="green") nGreen++; else nBehind++;
+    rowsH+=`<tr><td>${esc(g.title)}</td><td>${tgt}</td><td class="num">${esc(r.label)}</td><td><span class="st ${stt}">${r.score==null?"—":E.round(r.score)+"%"}</span></td></tr>`;
   }
-  h+=`</tbody></table>`;
+  rowsH+=`</tbody></table>`;
+  // collapsed by default so a mostly-empty table doesn't dominate the page
+  h+=`<details class="goaltbl" id="goaltbl" ${goalTableOpen?"open":""}><summary><h2 class="sec">Every goal — target vs actual</h2>
+    <span class="small">${nGreen} on track · ${nBehind} behind · ${nNone} no data yet</span></summary>${rowsH}</details>`;
 
   // goal-specific trend picker
   h+=`<h2 class="sec">Goal-specific trend</h2>
@@ -871,8 +890,11 @@ function goalTrendChart(goalId){
   const g=goalById(goalId); if(!g) return "";
   const pts=E.buildWeeks(state.period).map(w=>{ const future=E.parseDate(w.start)>E.parseDate(today());
     if(future) return {x:w.index,y:null,future:true};
-    const r=E.weeklyResult(g,state.entries,w,w.end<today()?w.end:today());
-    return {x:w.index,y:r.score==null?null:E.round(r.score),future:false}; });
+    const asOf=w.end<today()?w.end:today();
+    // a week with nothing entered at all is a gap, not a 0
+    const o=E.overallWeekly(state.goals,state.entries,w,asOf,TH,FW,state.categories);
+    const r=E.weeklyResult(g,state.entries,w,asOf);
+    return {x:w.index,y:(o.score==null||r.score==null)?null:E.round(r.score),future:false}; });
   return `<div class="chartwrap">${lineChart(pts,"W")}<div class="clegend">${esc(g.title)} — weekly result across the period.</div></div>`;
 }
 
@@ -957,6 +979,7 @@ function bind(){
   // grid cells (weekly check-in)
   document.querySelectorAll("[data-cell]").forEach(el=>el.onclick=(ev)=>{ ev.stopPropagation(); onCellClick(el.dataset.cell, el); });
   const fg=document.getElementById("fill-gaps"); if(fg) fg.onclick=fillGaps;
+  const gtb=document.getElementById("goaltbl"); if(gtb) gtb.ontoggle=()=>{ goalTableOpen=gtb.open; };
   // week navigation + jump
   const wt=document.getElementById("wk-this"); if(wt) wt.onclick=()=>{ const wk=E.weekForDate(today(),state.period); viewWeekStart=wk?wk.start:null; render(); };
   const wj=document.getElementById("wk-jump"); if(wj) wj.onchange=()=>{ const w=E.weekForDate(wj.value,state.period); if(w){ viewWeekStart=w.start; render(); } };

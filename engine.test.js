@@ -190,5 +190,20 @@ E.daysInWeek(weeks13[3]).slice(0,3).forEach(d=>insE.push(E2("gym",d)));
 const ins=E.insights(insGoals,insE,period,"2026-10-11",th,FW,[{id:"mind",name:"Mind"}],4);
 ok("insights produced", Array.isArray(ins) && ins.length>=1, JSON.stringify(ins));
 
+console.log("\n[Empty week is unscored, not 0%]");
+const egoals=[
+  {id:"gym",cat:"m",type:"count",freq:"W",target:3,active:true},
+  {id:"cre",cat:"m",type:"boolean",freq:"D",target:1,active:true},
+];
+const ecats=[{id:"m",name:"Mind"}];
+let ew=E.overallWeekly(egoals,[],w,sunday,th,FW,ecats);
+ok("no entries at all → overall score null", ew.score===null, JSON.stringify({s:ew.score}));
+ok("no entries at all → category null", E.categoryWeekly("m",egoals,[],w,sunday,th,FW).score===null);
+ew=E.overallWeekly(egoals,[E2("cre","2026-10-06")],w,sunday,th,FW,ecats);
+ok("one real entry → week is scored (empty count still counts 0)", ew.score!=null && ew.score<100, JSON.stringify({s:ew.score}));
+ok("explicit N/A on a count goal counts as data", E.weeklyResult({id:"gym",type:"count",freq:"W",target:3},[E2("gym","2026-10-06",{kind:"na"})],w,sunday).hasData===true);
+const etr=E.weeklyTrend(egoals,[],{start:"2026-09-14",end:"2026-10-11"},"2026-10-11",th,FW,ecats);
+ok("trend has gaps (null) for empty weeks", etr.every(t=>t.score===null), JSON.stringify(etr.map(t=>t.score)));
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`);
 process.exit(fail?1:0);

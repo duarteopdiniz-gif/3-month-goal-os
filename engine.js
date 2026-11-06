@@ -95,7 +95,7 @@ function weeklyResult(goal, entries, week, today){
       const score = clamp(actual/goal.target*100,0,100);
       return { score, status:statusOf(score,th), label:`${actual}/${goal.target}`,
                actual, target:goal.target, remaining:Math.max(goal.target-actual,0),
-               complete:actual>=goal.target, hasData:logged.length>0,
+               complete:actual>=goal.target, hasData:es.some(e=> e.kind==="logged"||e.kind==="na"),
                coverage:{have:null,need:null}, occurrences:logged };
     }
     case "boolean": {
@@ -224,16 +224,19 @@ function categoryWeekly(catId, goals, entries, week, today, th, FREQ_WEIGHT){
   const gs = goals.filter(g=> g.cat===catId && g.active!==false);
   const weekly = gs.filter(g=> g.freq==="D"||g.freq==="W");
   const longer = gs.filter(g=> g.freq==="M"||g.freq==="3M");
-  let wsum=0, acc=0; const rows=[]; let scoredCount=0;
+  let wsum=0, acc=0; const rows=[]; let scoredCount=0, anyData=false;
   for(const g of weekly){
     g._th=th; const r=weeklyResult(g, entries, week, today);
     const w=weightOf(g,FREQ_WEIGHT);
     rows.push({ goal:g, ...r, weight:w });
     if(r.score!=null){ wsum+=w; acc+=r.score*w; scoredCount++; }
+    if(r.hasData) anyData=true;
   }
   const longerRows = longer.map(g=>{ g._th=th; return { goal:g, ...periodResult(g, entries, today), weight:weightOf(g,FREQ_WEIGHT), context:true }; });
-  const score = wsum? acc/wsum : null;
-  return { score, status: score==null?"none":statusOf(score,th), rows, longerRows, hasWeekly:scoredCount>0 };
+  // A category with nothing entered this week has no score (shown as "—"), not 0%:
+  // count goals report 0/target even when empty, so require at least one real entry.
+  const score = (wsum && anyData)? acc/wsum : null;
+  return { score, status: score==null?"none":statusOf(score,th), rows, longerRows, hasWeekly:scoredCount>0 && anyData };
 }
 
 function overallWeekly(goals, entries, week, today, th, FREQ_WEIGHT, CATEGORIES){
@@ -400,12 +403,15 @@ function insights(goals, entries, period, today, th, FREQ_WEIGHT, CATEGORIES, li
   const weeks=buildWeeks(period).filter(w=>parseDate(w.start)<=parseDate(today));
   if(weeks.length<1) return out;
 
-  // helper: per-goal weekly score series (only weeks with data)
-  const series=(g)=> weeks.map(w=>({w:w.index, r:weeklyResult(g,entries,w,w.end<today?w.end:today)}))
-                         .filter(x=>x.r.score!=null);
-
   // 1) overall direction over last up-to-3 reviewed/scored weeks
   const trend=weeklyTrend(goals,entries,period,today,th,FREQ_WEIGHT,CATEGORIES).filter(t=>!t.future && t.score!=null);
+  const scoredWeeks=new Set(trend.map(t=>t.week));   // weeks where anything was entered
+
+  // helper: per-goal weekly score series (only weeks with data — an empty week is a gap, not a 0)
+  const series=(g)=> weeks.filter(w=>scoredWeeks.has(w.index))
+                         .map(w=>({w:w.index, r:weeklyResult(g,entries,w,w.end<today?w.end:today)}))
+                         .filter(x=>x.r.score!=null);
+
   if(trend.length>=2){
     const a=trend[Math.max(0,trend.length-3)].score, b=trend[trend.length-1].score;
     const diff=b-a;
